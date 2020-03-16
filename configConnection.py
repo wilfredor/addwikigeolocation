@@ -55,6 +55,7 @@ class ConfigConnection:
         self._info = self._get_image_info()
         self._metadata = self._get_metadata_gps()
         self._extmetadata = self._get_extmetadata_gps()
+        time.sleep(randrange(2))
 
     def metadata(self):
         return self._metadata
@@ -79,11 +80,12 @@ class ConfigConnection:
             }
 
             r = self._s.post(self._url, data=params)
-            data = r.json()
-            images = data["query"]["allimages"]
-            for img in images:
-                if img['name'] is not None:
-                    return img
+            if r:
+                data = r.json()
+                images = data["query"]["allimages"]
+                for img in images:
+                    if img['name'] is not None:
+                        return img
         return None
 
     def download_file(self):
@@ -153,12 +155,22 @@ class ConfigConnection:
             return result_list + self.get_images_from_category(categoryname, params)
         return result_list
 
-    def set_metadata_image_location_gps(self):
-        info = gpsphoto.GPSInfo(self._metadata)
-        # Get local file downloaded
-        photo = gpsphoto.GPSPhoto(self._filename)
-        # Modify GPS Data locally
-        photo.modGPSData(info, self._filename)
+    def can_set_metadata_location_gps(self):
+        # If extmetadata is present and not metadata setted
+        if self._extmetadata or self._metadata and not (self._extmetadata and self._metadata):
+            return True
+        return False
+    def set_metadata_location_gps(self):
+        if self.scan_set_metadata_location_gps():
+            self.download_file()
+            time.sleep(randrange(10))
+            info = gpsphoto.GPSInfo(self._metadata)
+            # Get local file downloaded
+            photo = gpsphoto.GPSPhoto(self._filename)
+            # Modify GPS Data locally
+            photo.modGPSData(info, self._filename)
+            # prevent overload the server
+            time.sleep(randrange(10))
 
     def upload_to_commons(self):
         params = {
