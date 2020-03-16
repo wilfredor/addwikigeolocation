@@ -108,32 +108,37 @@ class ConfigConnection:
         image_info = self._gps_info(result['query']['pages'][page_id], metatype)
         return image_info
 
-    def _gps_info(self, image_info, metatype):
-        if _valid_json(image_info):
-            json_image_details = image_info['imageinfo'][0][metatype]
-            if metatype == self._METADATA_TYPE:
-                gps_latitude = _get_metadata_gps("GPSLatitude", json_image_details)
-                gps_longitude = _get_metadata_gps("GPSLongitude", json_image_details)
-                return (gps_latitude, gps_longitude)
-            # Getting geolocation information from image metadata
-            elif metatype == self._EXTMETADATA_TYPE and "GPSLatitude" in json_image_details:
-                gps_latitude = float(json_image_details["GPSLatitude"]["value"])
-                gps_longitude = float(json_image_details['GPSLongitude']["value"])
-                return (gps_latitude, gps_longitude)
+    @staticmethod
+    def _get_lat_lon_gps(gpsname, json_image_details):
+        lat_lon = [image['value'] for image in json_image_details if image is not None and image['name'] == gpsname]
+        if lat_lon:
+            float(lat_lon[0])
         return None
 
     @staticmethod
-    def _get_metadata_gps(gpsname, json_image_details):
-        return float([image['value'] for image in json_image_details if image is not None and image['name'] == gpsname][0])
-
-    @staticmethod
-    def _valid_json(image_info):
+    def _valid_json(image_info, metatype):
         if "imageinfo" in image_info:
             if image_info['imageinfo'][0]:
                 if metatype in image_info['imageinfo'][0]:
                     if image_info['imageinfo'][0][metatype]:
                         return True
         return False
+
+    def _gps_info(self, image_info, metatype):
+        if self._valid_json(image_info, metatype):
+            json_image_details = image_info['imageinfo'][0][metatype]
+            if metatype == self._METADATA_TYPE:
+                gps_latitude = self._get_lat_lon_gps("GPSLatitude", json_image_details)
+                gps_longitude = self._get_lat_lon_gps("GPSLongitude", json_image_details)
+                if gps_latitude and gps_longitude:
+                    return (gps_latitude, gps_longitude)
+            # Getting geolocation information from image metadata
+            elif metatype == self._EXTMETADATA_TYPE:
+                if "GPSLatitude" in json_image_details:
+                    gps_latitude = float(json_image_details["GPSLatitude"]["value"])
+                    gps_longitude = float(json_image_details['GPSLongitude']["value"])
+                    return (gps_latitude, gps_longitude)
+        return None
 
     def get_images_from_category(self, categoryname, params={}):
         start_of_end_point_str = self._url + '/?action=query&format=json&list=categorymembers&cmlimit=max&cmtitle=Category:'
