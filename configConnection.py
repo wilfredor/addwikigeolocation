@@ -8,9 +8,11 @@ from GPSPhoto import gpsphoto
 
 class ConfigConnection:
 
-    def __init__(self, login, pawword):
+    def __init__(self, login, password):
         self._url = "https://commons.wikimedia.org/w/api.php"
         self._filename = None
+        self._login = login
+        self._password = password
         # Obtain a login token
         params = {
             'action': "query",
@@ -24,8 +26,8 @@ class ConfigConnection:
         self._login_token = data['query']['tokens']['logintoken']
         params = {
             'action': "login",
-            'lgname': login,
-            'lgpassword': pawword,
+            'lgname': self._login,
+            'lgpassword': self._password,
             'lgtoken': self._login_token,
             'format': "json"
         }
@@ -67,8 +69,8 @@ class ConfigConnection:
         if self._filename is not None:
             params = {
                 'action': "query",
-                'lgname': "Wilfredor@Robocito",
-                'lgpassword': "3gulv8no76qbv9rmu9fu3pi8vcr98jf0",
+                'lgname': self._login,
+                'lgpassword': self._password,
                 'lgtoken': self._login_token,
                 'format': "json",
                 "list": "allimages",
@@ -107,22 +109,31 @@ class ConfigConnection:
         return image_info
 
     def _gps_info(self, image_info, metatype):
+        if _valid_json(image_info):
+            json_image_details = image_info['imageinfo'][0][metatype]
+            if metatype == self._METADATA_TYPE:
+                gps_latitude = _get_metadata_gps("GPSLatitude", json_image_details)
+                gps_longitude = _get_metadata_gps("GPSLongitude", json_image_details)
+                return (gps_latitude, gps_longitude)
+            # Getting geolocation information from image metadata
+            elif metatype == self._EXTMETADATA_TYPE and "GPSLatitude" in json_image_details:
+                gps_latitude = float(json_image_details["GPSLatitude"]["value"])
+                gps_longitude = float(json_image_details['GPSLongitude']["value"])
+                return (gps_latitude, gps_longitude)
+        return None
+
+    @staticmethod
+    def _get_metadata_gps(gpsname, json_image_details):
+        return float([image['value'] for image in json_image_details if image is not None and image['name'] == gpsname][0])
+
+    @staticmethod
+    def _valid_json(image_info):
         if "imageinfo" in image_info:
             if image_info['imageinfo'][0]:
                 if metatype in image_info['imageinfo'][0]:
-                    # Getting geolocation information from Wikimedia Commons Image page
-                    if metatype == self._METADATA_TYPE and image_info['imageinfo'][0][metatype]:
-                        gps_latitude = [image['value'] for image in image_info['imageinfo'][0][metatype] if image is not None and image['name'] == "GPSLatitude"]
-                        gps_longitude = [image['value'] for image in image_info['imageinfo'][0][metatype] if image is not None and image['name'] == "GPSLongitude"]
-                        if gps_latitude and gps_longitude:
-                            return (float(gps_latitude[0]),float(gps_longitude[0]))
-                    # Getting geolocation information from image metadata
-                    elif metatype == self._EXTMETADATA_TYPE and image_info['imageinfo'][0][metatype]:
-                        if "GPSLatitude" in image_info['imageinfo'][0][metatype]:
-                            gps_latitude = image_info['imageinfo'][0][metatype]["GPSLatitude"]["value"]
-                            gps_longitude = image_info['imageinfo'][0][metatype]['GPSLongitude']["value"]
-                            return (float(gps_latitude), float(gps_longitude))
-        return None
+                    if image_info['imageinfo'][0][metatype]:
+                        return True
+        return False
 
     def get_images_from_category(self, categoryname, params={}):
         start_of_end_point_str = self._url + '/?action=query&format=json&list=categorymembers&cmlimit=max&cmtitle=Category:'
