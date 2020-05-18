@@ -1,10 +1,66 @@
 import os
 import time
-from random import randrange
 import requests
-import wget
 from GPSPhoto import gpsphoto
+import math
+import pyexiv2
+import fractions
+from PIL import Image
+from PIL.ExifTags import TAGS
+import sys
 
+
+def to_deg(value, loc):
+    if value < 0:
+        loc_value = loc[0]
+    elif value > 0:
+        loc_value = loc[1]
+    else:
+        loc_value = ""
+    abs_value = abs(value)
+    deg = int(abs_value)
+    t1 = (abs_value - deg) * 60
+    min = int(t1)
+    sec = round((t1 - min) * 60, 5)
+    return (deg, min, sec, loc_value)
+
+
+def set_gps_location(file_name, lat, lng):
+    """Adds GPS position as EXIF metadata
+
+    Keyword arguments:
+    file_name -- image file
+    lat -- latitude (as float)
+    lng -- longitude (as float)
+
+    """
+    lat_deg = to_deg(lat, ["S", "N"])
+    lng_deg = to_deg(lng, ["W", "E"])
+
+    print
+    lat_deg
+    print
+    lng_deg
+
+    # convert decimal coordinates into degrees, munutes and seconds
+    exiv_lat = (pyexiv2.Rational(lat_deg[0] * 60 + lat_deg[1], 60), pyexiv2.Rational(lat_deg[2] * 100, 6000),
+                pyexiv2.Rational(0, 1))
+    exiv_lng = (pyexiv2.Rational(lng_deg[0] * 60 + lng_deg[1], 60), pyexiv2.Rational(lng_deg[2] * 100, 6000),
+                pyexiv2.Rational(0, 1))
+
+    exiv_image = pyexiv2.Image(file_name)
+    exiv_image.readMetadata()
+    exif_keys = exiv_image.exifKeys()
+
+    exiv_image["Exif.GPSInfo.GPSLatitude"] = exiv_lat
+    exiv_image["Exif.GPSInfo.GPSLatitudeRef"] = lat_deg[3]
+    exiv_image["Exif.GPSInfo.GPSLongitude"] = exiv_lng
+    exiv_image["Exif.GPSInfo.GPSLongitudeRef"] = lng_deg[3]
+    exiv_image["Exif.Image.GPSTag"] = 654
+    exiv_image["Exif.GPSInfo.GPSMapDatum"] = "WGS-84"
+    exiv_image["Exif.GPSInfo.GPSVersionID"] = '2 0 0 0'
+
+    exiv_image.writeMetadata()
 
 class ConfigConnection:
 
@@ -88,10 +144,13 @@ class ConfigConnection:
                         return img
         return None
 
-    def download_file(self):
+    def download_file_new(self):
         if os.path.isfile(self._filename):
             os.remove(self._filename)
-        wget.download(self._info['url'])
+        r = requests.get(self._info['url'], stream=True)
+        bufsize = 1024
+        with open(self._filename, 'wb', buffering=bufsize) as f:
+            f.write(r.content)
 
     def _get_metadata_gps(self):
         return self._get_image_location_gps(self._METADATA_TYPE)
@@ -133,13 +192,13 @@ class ConfigConnection:
                 gps_latitude = self._get_lat_lon_gps("GPSLatitude", json_image_details)
                 gps_longitude = self._get_lat_lon_gps("GPSLongitude", json_image_details)
                 if gps_latitude and gps_longitude:
-                    return (gps_latitude, gps_longitude)
+                    return [gps_latitude, gps_longitude]
             # Getting geolocation information from image metadata
             elif metatype == self._EXTMETADATA_TYPE:
                 if "GPSLatitude" in json_image_details:
                     gps_latitude = float(json_image_details["GPSLatitude"]["value"])
                     gps_longitude = float(json_image_details['GPSLongitude']["value"])
-                    return (gps_latitude, gps_longitude)
+                    return [gps_latitude, gps_longitude]
         return None
 
     def get_images_from_category(self, categoryname, params={}):
@@ -161,15 +220,20 @@ class ConfigConnection:
             return True
         return False
     def set_metadata_location_gps(self):
-        if self.scan_set_metadata_location_gps():
-            self.download_file()
+        if self.can_set_metadata_location_gps():
             time.sleep(randrange(10))
-            info = gpsphoto.GPSInfo(self._metadata)
+            print("External GPS", self._get_extmetadata_gps())
+            gps_info = self._get_extmetadata_gps()
+            set_gps_location(self._filename, gps_info[0], gps_info[1])
+            '''
+            info = gpsphoto.GPSInfo(self._get_extmetadata_gps())
             # Get local file downloaded
             photo = gpsphoto.GPSPhoto(self._filename)
+
             # Modify GPS Data locally
             photo.modGPSData(info, self._filename)
             # prevent overload the server
+            '''
             time.sleep(randrange(10))
 
     def upload_to_commons(self):
@@ -183,8 +247,6 @@ class ConfigConnection:
         }
 
         file = {'file': (self._filename, open(self._filename, 'rb'), 'multipart/form-data')}
-        '''
         # upload file to wikimedia commons
         r = self._s.post(self._url, files=file, data=params)
         data = r.json()
-        '''
