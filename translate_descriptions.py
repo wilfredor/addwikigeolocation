@@ -136,6 +136,16 @@ def main(
     updated = 0
     skipped = 0
     errors = 0
+    def add_log(title: str, status: str, reason: str, source: str = "", desc: str = ""):
+        log_rows.append(
+            {
+                "title": title,
+                "status": status,
+                "reason": reason,
+                "source": source,
+                "desc_preview": (desc[:200] + "...") if len(desc) > 200 else desc,
+            }
+        )
     try:
         for u in uploads:
             try:
@@ -175,7 +185,7 @@ def main(
                     skipped += 1
                     reason = "no description field, extmetadata, or SDC"
                     progress.write(f"Skipping {u.title}: {reason}")
-                    log_rows.append({"title": u.title, "status": "skipped", "reason": reason})
+                    add_log(u.title, "skipped", reason, source="none", desc="")
                     progress.update(1)
                     continue
                 if not lang_map:
@@ -192,7 +202,7 @@ def main(
                     skipped += 1
                     reason = "all target languages present"
                     progress.write(f"Skipping {u.title}: {reason}")
-                    log_rows.append({"title": u.title, "status": "skipped", "reason": reason})
+                    add_log(u.title, "skipped", reason, source="wikitext/extmeta/SDC", desc=base_desc)
                     progress.update(1)
                     continue
                 new_desc = build_multilingual_desc(lang_map)
@@ -201,22 +211,22 @@ def main(
                     skipped += 1
                     reason = "could not rewrite safely"
                     progress.write(f"Skipping {u.title}: {reason}")
-                    log_rows.append({"title": u.title, "status": "skipped", "reason": reason})
+                    add_log(u.title, "skipped", reason, source="wikitext/extmeta/SDC", desc=base_desc)
                     progress.update(1)
                     continue
                 if apply:
                     page.save(new_text, summary=f"Add machine translation ({','.join(targets)}) to description")
                     updated += 1
-                    log_rows.append({"title": u.title, "status": "updated", "reason": ""})
+                    add_log(u.title, "updated", "", source="wikitext/extmeta/SDC", desc=base_desc)
                 else:
                     progress.write(f"Dry-run {u.title}: added {added} languages")
                     updated += 1
-                    log_rows.append({"title": u.title, "status": "dry-run", "reason": f"added {added}"})
+                    add_log(u.title, "dry-run", f"added {added}", source="wikitext/extmeta/SDC", desc=base_desc)
             except Exception as exc:
                 errors += 1
                 progress.write(f"Error on {u.title}: {exc}")
                 logging.exception("Error translating %s", u.title)
-                log_rows.append({"title": u.title, "status": "error", "reason": str(exc)})
+                add_log(u.title, "error", str(exc), source="", desc="")
             progress.update(1)
     except KeyboardInterrupt:
         progress.write("Interrupted by user.")
@@ -224,7 +234,7 @@ def main(
     client.cleanup()
     if log_csv:
         with log_csv.open("w", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=["title", "status", "reason"])
+            writer = csv.DictWriter(fh, fieldnames=["title", "status", "reason", "source", "desc_preview"])
             writer.writeheader()
             for row in log_rows:
                 writer.writerow(row)
