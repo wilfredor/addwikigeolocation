@@ -49,7 +49,12 @@ def simple_replace_description(text: str, source_lang: str, src_desc: str, trans
 
 
 def translate_text(src_lang: str, dest_lang: str, text: str) -> str:
-    translator = argostranslate.translate.get_translation(src_lang, dest_lang)
+    languages = argostranslate.translate.get_installed_languages()
+    from_lang = next((l for l in languages if l.code == src_lang), None)
+    to_lang = next((l for l in languages if l.code == dest_lang), None)
+    if not from_lang or not to_lang:
+        raise RuntimeError(f"Missing translation model {src_lang}->{dest_lang}")
+    translator = from_lang.get_translation(to_lang)
     return translator.translate(text)
 
 
