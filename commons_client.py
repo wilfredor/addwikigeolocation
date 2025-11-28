@@ -146,6 +146,23 @@ class CommonsClient:
             return None
         return imageinfo[0].get("url")
 
+    def get_previous_revision_url(self, title: str) -> Optional[str]:
+        data = self._site.api(
+            "query",
+            prop="imageinfo",
+            titles=f"File:{title}",
+            iiprop="url|timestamp|user|size",
+            iilimit=2,
+            format="json",
+        )
+        if not data or "query" not in data or "pages" not in data["query"]:
+            return None
+        page = next(iter(data["query"]["pages"].values()))
+        info = page.get("imageinfo", [])
+        if len(info) < 2:
+            return None
+        return info[1].get("url")
+
     def _has_metadata_gps(self, metadata_block: list) -> bool:
         if not metadata_block:
             return False
@@ -211,7 +228,11 @@ class CommonsClient:
         return uploads
 
     def list_uploads(
-        self, username: str, cont_token: Optional[dict] = None, seen_titles: Optional[set] = None
+        self,
+        username: str,
+        cont_token: Optional[dict] = None,
+        seen_titles: Optional[set] = None,
+        since: Optional[str] = None,
     ) -> Tuple[List[UploadInfo], Optional[dict]]:
         base_params = {
             "action": "query",
@@ -221,6 +242,10 @@ class CommonsClient:
             "leprop": "title",
             "lelimit": "max",
         }
+        if since:
+            # API expects lestart >= leend (descending), so start = now, end = since
+            base_params["lestart"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            base_params["leend"] = since
         if cont_token:
             base_params.update(cont_token)
         results: List[UploadInfo] = []
