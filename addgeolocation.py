@@ -6,6 +6,7 @@ import random
 import sys
 import time
 from pathlib import Path
+import tempfile
 from configConnection import ConfigConnection
 
 DEFAULT_COUNT_NUMBER = 19
@@ -30,6 +31,8 @@ def _parse_args():
     parser.add_argument("--output", default=DEFAULT_OUTPUT, help="Path to save scan results")
     parser.add_argument("--resume", action="store_true", help="Reuse existing scan file")
     parser.add_argument("--dry-run", action="store_true", help="Only list actions, do not modify files")
+    parser.add_argument("--upload", action="store_true", help="Upload modified files back to Commons")
+    parser.add_argument("--download-dir", help="Directory to store downloads (defaults to temp dir and cleans up)")
     return parser.parse_args()
 
 
@@ -60,6 +63,12 @@ def main():
         commons_user,
         commons_pass,
         )
+    tmpdir_ctx = None
+    download_dir = args.download_dir
+    if not download_dir:
+        tmpdir_ctx = tempfile.TemporaryDirectory()
+        download_dir = tmpdir_ctx.name
+    c.set_download_dir(download_dir)
 
     output_path = Path(args.output)
     needs_exif = []
@@ -102,46 +111,57 @@ def main():
     edit_timestamps = []
     for img in images:
         c.set_filename(img)
-        if not c.can_set_metadata_location_gps():
-            if c.metadata():
-                skipped_has_gps += 1
-                print(f"Skipping {img} (GPS already present)")
-            else:
-                skipped_no_gps += 1
-                print(f"No GPS data for {img}, skipping")
-            needs_exif.remove(img)
-            _save_scan(output_path, needs_exif, needs_template)
-            continue
-
         try:
-            print("processing: ", c._filename)
-            c.download_file_new()
-            c.set_metadata_location_gps()
-            '''
-            c.upload_to_commons()
-            '''
-            edits_count -= 1
-            updated += 1
-            needs_exif.remove(img)
-            _save_scan(output_path, needs_exif, needs_template)
-        except Exception as exc:
-            errors += 1
-            print(f"Error processing {img}: {exc}")
-        if edits_count == 0:
-            break
-        now = time.time()
-        edit_timestamps = [t for t in edit_timestamps if now - t < 60]
-        if len(edit_timestamps) >= args.max_edits_per_min:
-            sleep_for = 60 - (now - edit_timestamps[0])
-            time.sleep(max(sleep_for, 1))
-        edit_timestamps.append(time.time())
-        time.sleep(random.uniform(args.sleep * 0.5, args.sleep * 1.5))
+            if not c.can_set_metadata_location_gps():
+                if c.metadata():
+                    skipped_has_gps += 1
+                    print(f"Skipping {img} (GPS already present)")
+                else:
+                    skipped_no_gps += 1
+                    print(f"No GPS data for {img}, skipping")
+                needs_exif.remove(img)
+                _save_scan(output_path, needs_exif, needs_template)
+                continue
+
+            try:
+                print("processing: ", c._filename)
+                c.download_file_new()
+                c.set_metadata_location_gps()
+                if args.upload:
+                    c.upload_to_commons()
+                edits_count -= 1
+                updated += 1
+                needs_exif.remove(img)
+                _save_scan(output_path, needs_exif, needs_template)
+            except Exception as exc:
+                errors += 1
+                print(f"Error processing {img}: {exc}")
+            if edits_count == 0:
+                break
+            now = time.time()
+            edit_timestamps = [t for t in edit_timestamps if now - t < 60]
+            if len(edit_timestamps) >= args.max_edits_per_min:
+                sleep_for = 60 - (now - edit_timestamps[0])
+                time.sleep(max(sleep_for, 1))
+            edit_timestamps.append(time.time())
+            time.sleep(random.uniform(args.sleep * 0.5, args.sleep * 1.5))
+        finally:
+            # Clean up downloaded file to avoid filling disk across runs
+            local_path = c.local_path()
+            if local_path and local_path.exists():
+                try:
+                    local_path.unlink()
+                except OSError as exc:
+                    print(f"Could not remove {local_path}: {exc}")
 
     _save_scan(output_path, needs_exif, needs_template)
     print(
         f"Finished. Updated: {updated}, skipped (has GPS): {skipped_has_gps}, "
         f"skipped (no GPS source): {skipped_no_gps}, errors: {errors}."
     )
+
+    if tmpdir_ctx:
+        tmpdir_ctx.cleanup()
 
 
 if __name__ == "__main__":

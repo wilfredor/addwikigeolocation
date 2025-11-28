@@ -10,6 +10,8 @@ Bot/script to enrich Commons images with GPS metadata. It reads geolocation from
 - Writes GPS into EXIF only when the EXIF is missing GPS; otherwise skips. Logs counts of updated/skipped/errored.
 - Uses jittered sleeps and a per-minute cap to avoid hammering the API.
 - Saves scan results (needs EXIF / needs template) to a JSON file; supports resume and dry-run.
+- Downloads into a temp directory by default and removes files after processing to avoid filling disk.
+- Optional upload back to Commons via `--upload`.
 
 ## Requirements
 - Python 3.9+
@@ -35,6 +37,8 @@ python addgeolocation.py \
   --count 10 \
   --output gps_scan.json \
   --resume \
+  --upload \
+  --download-dir /tmp/addgeo \
   # --dry-run  # use to only list actions
 ```
 
@@ -43,6 +47,8 @@ Defaults:
 - Base sleep: `--sleep` (default 10s) with jitter; per-minute cap: `--max-edits-per-min` (default 30)
 - Scan file: `--output` (default `gps_scan.json`), use `--resume` to reuse it
 - Dry-run: `--dry-run` to only list counts and sample items
+- Download directory: defaults to a temporary directory; use `--download-dir` to override (files are cleaned after each item)
+- Upload: off by default; enable with `--upload`
 
 The script prints a summary: updated, skipped (already had GPS), skipped (no GPS source), and errors.
 

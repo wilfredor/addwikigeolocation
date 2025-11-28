@@ -12,6 +12,8 @@ from fractions import Fraction
 import piexif
 import struct
 from typing import Any, Dict, Optional
+from pathlib import Path
+import mwclient
 import mwclient
 
 
@@ -84,6 +86,8 @@ class ConfigConnection:
     def __init__(self, login, password):
         self._url = "https://commons.wikimedia.org/w/api.php"
         self._filename = None
+        self._local_path: Optional[Path] = None
+        self._download_dir = Path(".")
         self._login = login
         self._password = password
         self._s = requests.Session()
@@ -103,6 +107,10 @@ class ConfigConnection:
         self._info = None
         self._metadata = None
         self._pagecoords = None
+
+    def set_download_dir(self, path: str):
+        self._download_dir = Path(path)
+        self._download_dir.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def _strip_file_prefix(title: str) -> str:
@@ -131,6 +139,8 @@ class ConfigConnection:
 
     def set_filename(self, value):
         self._filename = value
+        safe_name = value.replace("/", "_")
+        self._local_path = self._download_dir / safe_name
         page_data = self._fetch_page_data(value)
         self._metadata = page_data.get("metadata")
         self._pagecoords = page_data.get("coords")
@@ -142,6 +152,9 @@ class ConfigConnection:
 
     def info(self):
         return self._info
+
+    def local_path(self) -> Optional[Path]:
+        return self._local_path
 
     def download_file_new(self):
         """Downloads a file from a URL and saves it with the specified filename."""
@@ -160,8 +173,8 @@ class ConfigConnection:
 
         try:
             # If the file already exists, remove it before downloading
-            if os.path.exists(self._filename):
-                os.remove(self._filename)
+            if self._local_path and self._local_path.exists():
+                self._local_path.unlink()
 
             print(f"Downloading from: {file_url}")
 
@@ -170,13 +183,13 @@ class ConfigConnection:
                 r.raise_for_status()  # Raise an error if the request fails
 
                 # Save the file in binary mode
-                with open(self._filename, "wb") as f:
+                with open(self._local_path, "wb") as f:
                     for chunk in r.iter_content(
                         chunk_size=8192
                     ):  # Use a larger buffer (8KB)
                         f.write(chunk)
 
-            print(f"Download completed: {self._filename}")
+            print(f"Download completed: {self._local_path}")
 
         except requests.exceptions.RequestException as e:
             print(f"Error downloading the file: {e}")
@@ -270,7 +283,8 @@ class ConfigConnection:
                 print("Invalid GPS info, skipping", self._filename, gps_info)
                 return
             print("External GPS", gps_info)
-            set_gps_location(self._filename, gps_info[0], gps_info[1])
+            target_path = self._local_path or Path(self._filename)
+            set_gps_location(target_path, gps_info[0], gps_info[1])
             """
             info = gpsphoto.GPSInfo(self._get_metadata_gps())
             # Get local file downloaded
@@ -283,17 +297,14 @@ class ConfigConnection:
             time.sleep(randrange(10))
 
     def upload_to_commons(self):
-        params = {
-            "action": "upload",
-            "filename": self._filename,
-            "comment": "Adding geolocation",
-            "format": "json",
-            "token": self._csrf_token,
-            "ignorewarnings": 1,
-        }
-
-        # upload file to wikimedia commons
-        with open(self._filename, "rb") as fh:
-            file = {"file": (self._filename, fh, "multipart/form-data")}
-            r = self._s.post(self._url, files=file, data=params)
-            data = r.json()
+        if not self._local_path:
+            print("No local file to upload.")
+            return
+        with open(self._local_path, "rb") as fh:
+            self._site.upload(
+                fh,
+                filename=self._filename,
+                description=None,
+                comment="Adding geolocation",
+                ignore=True,
+            )
