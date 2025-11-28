@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Tuple
 
 from tqdm import tqdm
+import logging
 
 from commons_client import CommonsClient, UploadInfo
 from scanner import ScanState, save_state
@@ -41,7 +42,7 @@ def process_needs_exif(
     edit_timestamps = []
     total_images = len(images)
 
-    progress = tqdm(total=total_images, unit="file", desc="Processing", leave=True)
+    progress = tqdm(total=total_images, unit="file", desc="Processing", leave=True, colour="green")
 
     for idx, upload_info in enumerate(images, start=1):
         local_path = None
@@ -82,6 +83,7 @@ def process_needs_exif(
         except Exception as exc:
             errors += 1
             progress.write(f"Error processing {upload_info.title}: {exc}")
+            logging.exception("Error processing %s", upload_info.title)
         finally:
             if local_path:
                 client.cleanup_file(local_path)

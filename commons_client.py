@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import time
+import logging
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from random import randrange
@@ -114,6 +115,7 @@ class CommonsClient:
             self._download_dir_ctx = tempfile.TemporaryDirectory()
             self._download_dir = Path(self._download_dir_ctx.name)
         self.download_dir = self._download_dir
+        self._logger = logging.getLogger(__name__)
 
     def close(self):
         if self._download_dir_ctx:
@@ -221,12 +223,16 @@ class CommonsClient:
         try:
             with self._session.get(upload.url, stream=True, timeout=10) as r:
                 r.raise_for_status()
+                ctype = r.headers.get("Content-Type", "")
+                if "jpeg" not in ctype.lower():
+                    self._logger.warning("Skipping %s due to non-JPEG content-type: %s", upload.title, ctype)
+                    return None
                 with open(local_path, "wb") as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
             return local_path
         except requests.exceptions.RequestException as e:
-            print(f"Error downloading {upload.title}: {e}")
+            self._logger.error("Error downloading %s: %s", upload.title, e)
             return None
 
     def write_exif(self, upload: UploadInfo, local_path: Path):

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional
 from tempfile import NamedTemporaryFile
 from datetime import datetime
+import logging
 
 from tqdm import tqdm
 
@@ -48,7 +49,7 @@ def load_state(path: Path) -> ScanState:
             ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
             backup = path.with_suffix(path.suffix + f".corrupt.{ts}.bak")
             path.rename(backup)
-            print(f"Corrupted state file moved to {backup}, starting fresh.")
+            logging.warning("Corrupted state file moved to %s, starting fresh.", backup)
     return ScanState()
 
 
@@ -74,7 +75,7 @@ def scan_user_uploads(client: CommonsClient, target_user: str, state: ScanState,
     if state.needs_exif and state.needs_template and not cont:
         return state
 
-    print(f"Scanning uploads for {target_user}...")
+    logging.info("Scanning uploads for %s...", target_user)
     progress = tqdm(total=None, unit="file", desc="Scanning", colour="cyan")
     while True:
         uploads, cont = client.list_uploads(target_user, cont_token=cont, seen_titles=seen_titles)
@@ -94,8 +95,10 @@ def scan_user_uploads(client: CommonsClient, target_user: str, state: ScanState,
         time.sleep(1)
     progress.close()
 
-    print(
-        f"Scan complete. Found {len(state.needs_exif) + len(state.needs_template)} uploads "
-        f"(needs_exif={len(state.needs_exif)}, needs_template={len(state.needs_template)})."
+    logging.info(
+        "Scan complete. Found %s uploads (needs_exif=%s, needs_template=%s).",
+        len(state.needs_exif) + len(state.needs_template),
+        len(state.needs_exif),
+        len(state.needs_template),
     )
     return state

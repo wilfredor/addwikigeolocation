@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Optional
+import logging
 import typer
 
 from commons_client import CommonsClient
@@ -38,6 +39,10 @@ def main(
     ),
 ):
     """Add GPS to EXIF using page coordinates for a user's uploads."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     target = target_user or commons_user
 
     client = CommonsClient(commons_user, commons_pass, download_dir=str(download_dir) if download_dir else None)
