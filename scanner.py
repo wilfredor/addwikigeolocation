@@ -80,6 +80,8 @@ def scan_user_uploads(client: CommonsClient, target_user: str, state: ScanState,
         uploads, cont = client.list_uploads(target_user, cont_token=cont, seen_titles=seen_titles)
         progress.update(len(uploads))
         for upload in uploads:
+            if not upload.title.lower().endswith((".jpg", ".jpeg")):
+                continue
             if upload.has_coords and not upload.has_exif_gps:
                 state.needs_exif.append(upload)
             elif upload.has_exif_gps and not upload.has_coords:
