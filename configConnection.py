@@ -11,6 +11,7 @@ import sys
 from fractions import Fraction
 import piexif
 import struct
+from typing import Any, Dict, Optional
 
 
 def decimal_to_dms(deg):
@@ -113,15 +114,35 @@ class ConfigConnection:
         self._info = None
         self._metadata = None
         self._extmetadata = None
+        self._pagecoords = None
 
         self._METADATA_TYPE = "metadata"
         self._EXTMETADATA_TYPE = "extmetadata"
+        self._max_retries = 3
+        self._backoff_seconds = 2
+
+    def _request_json_with_backoff(
+        self, method: str, url: str, **kwargs: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Basic backoff for API limit / transient failures."""
+        for attempt in range(1, self._max_retries + 1):
+            try:
+                r = self._s.request(method, url, timeout=10, **kwargs)
+                if r.status_code in (429, 502, 503, 504):
+                    raise requests.exceptions.RetryError(f"HTTP {r.status_code}")
+                return r.json()
+            except (requests.exceptions.RequestException, ValueError) as exc:
+                if attempt >= self._max_retries:
+                    print(f"API request failed after retries: {exc}")
+                    return None
+                time.sleep(self._backoff_seconds * attempt)
 
     def set_filename(self, value):
         self._filename = value
         self._info = self._get_image_info()
         self._metadata = self._get_metadata_gps()
         self._extmetadata = self._get_extmetadata_gps()
+        self._pagecoords = self._get_page_coordinates()
         time.sleep(randrange(2))
 
     def metadata(self):
@@ -146,9 +167,8 @@ class ConfigConnection:
                 "aito": self._filename,
             }
 
-            r = self._s.post(self._url, data=params)
-            if r:
-                data = r.json()
+            data = self._request_json_with_backoff("post", self._url, data=params)
+            if data and "query" in data and "allimages" in data["query"]:
                 images = data["query"]["allimages"]
                 for img in images:
                     if img["name"] is not None:
@@ -206,11 +226,36 @@ class ConfigConnection:
             "|userid|canonicaltitle|url|" + metatype + "&format=json"
         )
         request_url = start_of_end_point_str + self._filename + end_of_end_point_str
-        result = requests.get(request_url)
-        result = result.json()
+        result = self._request_json_with_backoff("get", request_url)
+        if not result:
+            return None
         page_id = next(iter(result["query"]["pages"]))
         image_info = self._gps_info(result["query"]["pages"][page_id], metatype)
         return image_info
+
+    def _get_page_coordinates(self) -> Optional[list]:
+        if not self._filename:
+            return None
+        params = {
+            "action": "query",
+            "prop": "coordinates",
+            "format": "json",
+            "titles": f"File:{self._filename}",
+        }
+        data = self._request_json_with_backoff("get", self._url, params=params)
+        if not data or "query" not in data or "pages" not in data["query"]:
+            return None
+        page_id = next(iter(data["query"]["pages"]))
+        page = data["query"]["pages"][page_id]
+        coords = page.get("coordinates")
+        if not coords:
+            return None
+        first = coords[0]
+        lat = first.get("lat")
+        lon = first.get("lon")
+        if lat is None or lon is None:
+            return None
+        return [lat, lon]
 
     @staticmethod
     def _get_lat_lon_gps(gpsname, json_image_details):
@@ -219,9 +264,12 @@ class ConfigConnection:
             for image in json_image_details
             if image is not None and image["name"] == gpsname
         ]
-        if lat_lon:
-            float(lat_lon[0])
-        return None
+        if not lat_lon:
+            return None
+        try:
+            return float(lat_lon[0])
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _valid_json(image_info, metatype):
@@ -251,40 +299,42 @@ class ConfigConnection:
         return None
 
     def get_images_from_category(self, categoryname, params={}):
-        start_of_end_point_str = (
+        base_url = (
             self._url
             + "/?action=query&format=json&list=categorymembers&cmlimit=max&cmtitle=Category:"
         )
-        request_url = start_of_end_point_str + categoryname
-        result = requests.get(request_url, params)
-        result = result.json()
-        image_info_list = result["query"]["categorymembers"]
-        result_list = [
-            image["title"].replace("File:", "")
-            for image in image_info_list
-            if image["title"].endswith(".jpg")
-        ]
-        if "continue" in result:
-            params = result["continue"]
+        request_url = base_url + categoryname
+        results = []
+        more_params = dict(params)
+        while True:
+            result = self._request_json_with_backoff("get", request_url, params=more_params)
+            if not result:
+                break
+            image_info_list = result["query"]["categorymembers"]
+            results.extend(
+                image["title"].replace("File:", "")
+                for image in image_info_list
+                if image["title"].endswith(".jpg")
+            )
+            if "continue" not in result:
+                break
+            more_params = result["continue"]
             time.sleep(randrange(1))
-            return result_list + self.get_images_from_category(categoryname, params)
-        return result_list
+        return results
 
     def can_set_metadata_location_gps(self):
-        # If extmetadata is present and not metadata setted
-        if (
-            self._extmetadata
-            or self._metadata
-            and not (self._extmetadata and self._metadata)
-        ):
-            return True
-        return False
+        # Only write when GPS exists (page coords preferred, extmetadata fallback) and EXIF is missing.
+        has_source = self._pagecoords or self._extmetadata
+        return has_source and not self._metadata
 
     def set_metadata_location_gps(self):
         if self.can_set_metadata_location_gps():
             time.sleep(randrange(10))
-            print("External GPS", self._get_extmetadata_gps())
-            gps_info = self._get_extmetadata_gps()
+            gps_info = self._pagecoords or self._get_extmetadata_gps()
+            if not gps_info:
+                print("No GPS info available to write for", self._filename)
+                return
+            print("External GPS", gps_info)
             set_gps_location(self._filename, gps_info[0], gps_info[1])
             """
             info = gpsphoto.GPSInfo(self._get_extmetadata_gps())
@@ -307,9 +357,8 @@ class ConfigConnection:
             "ignorewarnings": 1,
         }
 
-        file = {
-            "file": (self._filename, open(self._filename, "rb"), "multipart/form-data")
-        }
         # upload file to wikimedia commons
-        r = self._s.post(self._url, files=file, data=params)
-        data = r.json()
+        with open(self._filename, "rb") as fh:
+            file = {"file": (self._filename, fh, "multipart/form-data")}
+            r = self._s.post(self._url, files=file, data=params)
+            data = r.json()
