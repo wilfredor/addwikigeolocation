@@ -1,23 +1,21 @@
 # addwikigeolocation
-Bot/script to enrich Commons images with GPS metadata. It reads geolocation from the file page coordinates (with EXIF GPS as fallback) and writes it into the local file's EXIF GPS block, with safeguards to avoid overwriting images that already have GPS.
+Bot/script to enrich Commons images with GPS metadata. It reads geolocation from the file page coordinates (with EXIF GPS as fallback) and writes it into the local file's EXIF GPS block, with safeguards to avoid overwriting images that already have GPS. Now organized in small modules with a Typer CLI and resumable scans.
 
 ## What it does
-- Pulls uploads from a user, partitions them into:
+- Pulls uploads from a user (via logevents), deduplicates, and partitions into:
   - files with page coordinates but missing EXIF GPS (to update EXIF);
-  - files with EXIF GPS but missing page coordinates (report only, for template addition).
-- Shuffles the list to update EXIF, processes up to a configurable max.
-- Reads GPS from the file page coordinates (`prop=coordinates`), falling back to EXIF metadata only if needed.
-- Writes GPS into EXIF only when the EXIF is missing GPS; otherwise skips. Logs counts of updated/skipped/errored.
-- Uses jittered sleeps and a per-minute cap to avoid hammering the API.
-- Saves scan results (needs EXIF / needs template) to a JSON file; supports resume and dry-run.
-- Downloads into a temp directory by default and removes files after processing to avoid filling disk.
+  - files with EXIF GPS but missing page coordinates (report only).
+- Shuffles and processes the EXIF-missing list up to a configurable max, showing progress `[x/total]`.
+- Reads GPS from page coordinates, falling back to EXIF if needed; writes EXIF only when missing GPS.
+- Resumable scans: stores lists and continuation token in `gps_scan.json` and updates after each batch/item.
+- Uses jittered sleeps and per-minute cap; downloads to temp dir by default and cleans up.
 - Optional upload back to Commons via `--upload`.
 
 ## Requirements
 - Python 3.9+
-- Packages: `requests`, `Pillow`, `piexif`, `GPSPhoto`, `mwclient`
+- Packages: `requests`, `Pillow`, `piexif`, `GPSPhoto`, `mwclient`, `typer`
   ```sh
-  pip install requests Pillow piexif GPSPhoto mwclient
+  pip install requests Pillow piexif GPSPhoto mwclient typer
   ```
 
 ## Credentials
@@ -28,26 +26,25 @@ Bot/script to enrich Commons images with GPS metadata. It reads geolocation from
 
 ## Running
 ```sh
-# optional: export credentials first
 export COMMONS_USER=YourUser
 export COMMONS_PASS=YourPassword
 
 python addgeolocation.py \
   --target-user YourUser \
   --count 10 \
-  --output gps_scan.json \
+  --state-file gps_scan.json \
   --resume \
   --upload \
   --download-dir /tmp/addgeo \
-  # --dry-run  # use to only list actions
+  # --dry-run   # to only scan/list actions
 ```
 
 Defaults:
-- Max edits per run: `--count` (default 19)
-- Base sleep: `--sleep` (default 10s) with jitter; per-minute cap: `--max-edits-per-min` (default 30)
-- Scan file: `--output` (default `gps_scan.json`), use `--resume` to reuse it
-- Dry-run: `--dry-run` to only list counts and sample items
-- Download directory: defaults to a temporary directory; use `--download-dir` to override (files are cleaned after each item)
+- Max edits per run: `--count` (19)
+- Base sleep: `--sleep` (10s) with jitter; per-minute cap: `--max-edits-per-min` (30)
+- State file: `--state-file` (`gps_scan.json`) stores lists + continuation token; `--resume/--no-resume` controls reuse
+- Dry-run: `--dry-run` to only scan/list
+- Download directory: temp dir by default; override with `--download-dir`
 - Upload: off by default; enable with `--upload`
 
 The script prints a summary: updated, skipped (already had GPS), skipped (no GPS source), and errors.

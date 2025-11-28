@@ -1,188 +1,78 @@
-import argparse
-import getpass
-import json
+from __future__ import annotations
+
 import os
-import random
-import sys
-import time
 from pathlib import Path
-import tempfile
-from configConnection import ConfigConnection
+from typing import Optional
+import typer
 
-DEFAULT_COUNT_NUMBER = 19
-DEFAULT_SLEEP_SECONDS = 10
-DEFAULT_MAX_EDITS_PER_MIN = 30
-DEFAULT_OUTPUT = "gps_scan.json"
+from commons_client import CommonsClient
+from processor import process_needs_exif
+from scanner import load_state, save_state, scan_user_uploads, ScanState
 
-
-def _get_credential(env_name, prompt_text, secret=False):
-    value = os.getenv(env_name)
-    if value:
-        return value
-    return getpass.getpass(prompt_text) if secret else input(prompt_text)
+app = typer.Typer(add_completion=False)
 
 
-def _parse_args():
-    parser = argparse.ArgumentParser(description="Add GPS to EXIF from page coords.")
-    parser.add_argument("--target-user", help="Uploader to scan (defaults to login user)")
-    parser.add_argument("--count", type=int, default=DEFAULT_COUNT_NUMBER, help="Max edits to perform")
-    parser.add_argument("--sleep", type=float, default=DEFAULT_SLEEP_SECONDS, help="Base sleep seconds")
-    parser.add_argument("--max-edits-per-min", type=int, default=DEFAULT_MAX_EDITS_PER_MIN)
-    parser.add_argument("--output", default=DEFAULT_OUTPUT, help="Path to save scan results")
-    parser.add_argument("--resume", action="store_true", help="Reuse existing scan file")
-    parser.add_argument("--dry-run", action="store_true", help="Only list actions, do not modify files")
-    parser.add_argument("--upload", action="store_true", help="Upload modified files back to Commons")
-    parser.add_argument("--download-dir", help="Directory to store downloads (defaults to temp dir and cleans up)")
-    return parser.parse_args()
+@app.command()
+def main(
+    target_user: str = typer.Option(None, "--target-user", help="Uploader to scan (defaults to login user)"),
+    count: int = typer.Option(19, "--count", help="Max edits to perform"),
+    sleep: float = typer.Option(10.0, "--sleep", help="Base sleep seconds"),
+    max_edits_per_min: int = typer.Option(30, "--max-edits-per-min", help="Max edits per minute"),
+    state_file: Path = typer.Option(Path("gps_scan.json"), "--state-file", help="Path to save scan results"),
+    upload: bool = typer.Option(False, "--upload", help="Upload modified files back to Commons"),
+    download_dir: Optional[Path] = typer.Option(None, "--download-dir", help="Directory to store downloads (defaults to temp)"),
+    resume: bool = typer.Option(True, "--resume/--no-resume", help="Reuse existing scan file if present"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Only list actions, do not modify files"),
+    commons_user: str = typer.Option(
+        None,
+        "--commons-user",
+        envvar="COMMONS_USER",
+        prompt="Commons username",
+    ),
+    commons_pass: str = typer.Option(
+        None,
+        "--commons-pass",
+        envvar="COMMONS_PASS",
+        prompt=True,
+        hide_input=True,
+    ),
+):
+    """Add GPS to EXIF using page coordinates for a user's uploads."""
+    target = target_user or commons_user
 
+    client = CommonsClient(commons_user, commons_pass, download_dir=str(download_dir) if download_dir else None)
+    state = load_state(state_file) if resume else ScanState()
 
-def _load_scan(path: Path):
-    if path.exists():
-        with path.open() as fh:
-            return json.load(fh)
-    return None
-
-
-def _save_scan(path: Path, needs_exif, needs_template, scan_continue=None):
-    payload = {
-        "needs_exif": list(needs_exif),
-        "needs_template": list(needs_template),
-        "scan_continue": scan_continue,
-    }
-    with path.open("w") as fh:
-        json.dump(payload, fh, indent=2)
-
-
-def main():
-    args = _parse_args()
-
-    commons_user = _get_credential("COMMONS_USER", "Commons username: ")
-    commons_pass = _get_credential("COMMONS_PASS", "Commons password: ", secret=True)
-    target_user = args.target_user or os.getenv("COMMONS_TARGET_USER") or commons_user
-
-    c = ConfigConnection(
-        commons_user,
-        commons_pass,
-        )
-    tmpdir_ctx = None
-    download_dir = args.download_dir
-    if not download_dir:
-        tmpdir_ctx = tempfile.TemporaryDirectory()
-        download_dir = tmpdir_ctx.name
-    c.set_download_dir(download_dir)
-
-    output_path = Path(args.output)
-    needs_exif = []
-    needs_template = []
-    scan_continue = None
-    if args.resume:
-        scan = _load_scan(output_path)
-        if scan:
-            needs_exif = scan.get("needs_exif", [])
-            needs_template = scan.get("needs_template", [])
-            scan_continue = scan.get("scan_continue")
-
-    if not needs_exif and not needs_template or scan_continue:
-        print(f"Scanning uploads for {target_user}...")
-        seen_titles = set(needs_exif) | set(needs_template)
-        while True:
-            uploads, scan_continue = c.get_user_uploads_with_gps(
-                target_user, cont_token=scan_continue, seen_titles=seen_titles
-            )
-            print(f" Scan batch complete. Found {len(uploads)} items.")
-            needs_template.extend(
-                u["title"]
-                for u in uploads
-                if u["has_exif_gps"] and not u["has_coords"]
-            )
-            needs_exif.extend(
-                u["title"] for u in uploads if u["has_coords"] and not u["has_exif_gps"]
-            )
-            seen_titles.update(needs_template)
-            seen_titles.update(needs_exif)
-            _save_scan(output_path, needs_exif, needs_template, scan_continue)
-            if not scan_continue or not uploads:
-                break
-        print(
-            f"Scan complete. Found {len(needs_exif) + len(needs_template)} uploads (needs_exif={len(needs_exif)}, needs_template={len(needs_template)})."
-        )
+    state = scan_user_uploads(client, target, state, state_file)
 
     print(
-        f"Uploads for {target_user}: {len(needs_exif)} need EXIF GPS, "
-        f"{len(needs_template)} need page template."
+        f"Uploads for {target}: {len(state.needs_exif)} need EXIF GPS, "
+        f"{len(state.needs_template)} need page template."
     )
-    if needs_template:
-        print(f"Examples needing template (up to 5): {needs_template[:5]}")
+    if state.needs_template:
+        print(f"Examples needing template (up to 5): {state.needs_template[:5]}")
 
-    if args.dry_run:
+    if dry_run:
         print("Dry run: exiting without modifications.")
+        client.close()
         return
 
-    edits_count = args.count
-    updated = 0
-    skipped_has_gps = 0
-    skipped_no_gps = 0
-    errors = 0
-
-    images = list(needs_exif)
-    random.shuffle(images)
-    edit_timestamps = []
-    total_images = len(images)
-    for idx, img in enumerate(images, start=1):
-        c.set_filename(img)
-        try:
-            if not c.can_set_metadata_location_gps():
-                if c.metadata():
-                    skipped_has_gps += 1
-                    print(f"Skipping {img} (GPS already present)")
-                else:
-                    skipped_no_gps += 1
-                    print(f"No GPS data for {img}, skipping")
-                needs_exif.remove(img)
-                _save_scan(output_path, needs_exif, needs_template)
-                continue
-
-            try:
-                print(f"[{idx}/{total_images}] processing: {c._filename}")
-                c.download_file_new()
-                c.set_metadata_location_gps()
-                if args.upload:
-                    c.upload_to_commons()
-                edits_count -= 1
-                updated += 1
-                needs_exif.remove(img)
-                _save_scan(output_path, needs_exif, needs_template)
-            except Exception as exc:
-                errors += 1
-                print(f"Error processing {img}: {exc}")
-            if edits_count == 0:
-                break
-            now = time.time()
-            edit_timestamps = [t for t in edit_timestamps if now - t < 60]
-            if len(edit_timestamps) >= args.max_edits_per_min:
-                sleep_for = 60 - (now - edit_timestamps[0])
-                time.sleep(max(sleep_for, 1))
-            edit_timestamps.append(time.time())
-            time.sleep(random.uniform(args.sleep * 0.5, args.sleep * 1.5))
-        finally:
-            # Clean up downloaded file to avoid filling disk across runs
-            local_path = c.local_path()
-            if local_path and local_path.exists():
-                try:
-                    local_path.unlink()
-                except OSError as exc:
-                    print(f"Could not remove {local_path}: {exc}")
-
-    _save_scan(output_path, needs_exif, needs_template)
+    updated, skipped_has_gps, skipped_no_gps, errors = process_needs_exif(
+        client=client,
+        state=state,
+        state_path=state_file,
+        count=count,
+        base_sleep=sleep,
+        max_edits_per_min=max_edits_per_min,
+        upload=upload,
+    )
+    save_state(state_file, state)
     print(
         f"Finished. Updated: {updated}, skipped (has GPS): {skipped_has_gps}, "
         f"skipped (no GPS source): {skipped_no_gps}, errors: {errors}."
     )
-
-    if tmpdir_ctx:
-        tmpdir_ctx.cleanup()
+    client.close()
 
 
 if __name__ == "__main__":
-    main()
-
+    app()
