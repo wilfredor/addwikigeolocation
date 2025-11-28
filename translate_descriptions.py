@@ -5,6 +5,7 @@ import re
 import csv
 from pathlib import Path
 from typing import List, Optional, Dict
+import mwclient
 
 import typer
 from tqdm import tqdm
@@ -225,9 +226,20 @@ def main(
                     progress.update(1)
                     continue
                 if apply:
-                    page.save(new_text, summary=f"Add machine translation ({','.join(targets)}) to description")
-                    updated += 1
-                    add_log(u.title, "updated", "", source="wikitext/extmeta/SDC", desc=base_desc)
+                    try:
+                        page.save(new_text, summary=f"Add machine translation ({','.join(targets)}) to description")
+                        updated += 1
+                        add_log(u.title, "updated", "", source="wikitext/extmeta/SDC", desc=base_desc)
+                    except mwclient.errors.APIError as e:
+                        if e.args and e.args[0] == "abusefilter-warning":
+                            skipped += 1
+                            reason = f"abusefilter: {e.args[1]}"
+                            progress.write(f"Skipping {u.title}: {reason}")
+                            add_log(u.title, "skipped", reason, source="wikitext/extmeta/SDC", desc=base_desc)
+                            progress.update(1)
+                            continue
+                        else:
+                            raise
                 else:
                     progress.write(f"Dry-run {u.title}: added {added} languages")
                     updated += 1
