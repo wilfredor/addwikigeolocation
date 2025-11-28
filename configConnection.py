@@ -235,7 +235,7 @@ class ConfigConnection:
             "generator": "allimages",
             "gaiuser": username,
             "gailimit": "max",
-            "aisort": "timestamp",
+            "gaisort": "timestamp",
             "prop": "imageinfo|coordinates",
             "iiprop": "metadata|url",
             "format": "json",
