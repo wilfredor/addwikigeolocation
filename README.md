@@ -2,7 +2,10 @@
 Bot/script to enrich Commons images with GPS metadata. It reads geolocation already present on Commons (extmetadata) and writes it into the local file's EXIF GPS block, with safeguards to avoid overwriting images that already have GPS.
 
 ## What it does
-- Pulls JPEGs from a category, shuffles the list, and processes up to `COUNT_NUMBER` items.
+- Pulls uploads from a user, partitions them into:
+  - files with page coordinates but missing EXIF GPS (to update EXIF);
+  - files with EXIF GPS but missing page coordinates (report only, for template addition).
+- Shuffles the list to update EXIF, processes up to `COUNT_NUMBER` items.
 - Reads GPS from the file page coordinates (`prop=coordinates`), falling back to `extmetadata` only if needed.
 - Writes GPS into EXIF only when the EXIF is missing GPS; otherwise skips. Logs counts of updated/skipped/errored.
 - Uses jittered sleeps and a per-minute cap to avoid hammering the API.
@@ -16,6 +19,7 @@ Bot/script to enrich Commons images with GPS metadata. It reads geolocation alre
 
 ## Credentials
 - Preferred: set environment variables `COMMONS_USER` and `COMMONS_PASS`.
+- Optional: set `COMMONS_TARGET_USER` to scan uploads from a different user (defaults to the login user).
 - Interactive fallback: if env vars are absent, the script will prompt for username and password (password is hidden with `getpass`).
 - A sample `.env.example` is provided; keep your real `.env` out of git.
 

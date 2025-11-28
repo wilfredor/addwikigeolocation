@@ -121,6 +121,10 @@ class ConfigConnection:
         self._max_retries = 3
         self._backoff_seconds = 2
 
+    @staticmethod
+    def _strip_file_prefix(title: str) -> str:
+        return title.replace("File:", "", 1) if title.startswith("File:") else title
+
     def _request_json_with_backoff(
         self, method: str, url: str, **kwargs: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
@@ -319,6 +323,52 @@ class ConfigConnection:
             if "continue" not in result:
                 break
             more_params = result["continue"]
+            time.sleep(randrange(1))
+        return results
+
+    def _has_metadata_gps(self, metadata_block: list) -> bool:
+        return (
+            self._get_lat_lon_gps("GPSLatitude", metadata_block) is not None
+            and self._get_lat_lon_gps("GPSLongitude", metadata_block) is not None
+        )
+
+    def get_user_uploads_with_gps(self, username: str, params: dict = {}) -> list:
+        """Return uploads for a user with flags for page coords and EXIF GPS."""
+        base_params = {
+            "action": "query",
+            "generator": "allimages",
+            "gaiuser": username,
+            "gailimit": "max",
+            "prop": "imageinfo|coordinates",
+            "iiprop": "metadata",
+            "format": "json",
+        }
+        base_params.update(params)
+        results = []
+        more_params = dict(base_params)
+        while True:
+            data = self._request_json_with_backoff("get", self._url, params=more_params)
+            if not data or "query" not in data or "pages" not in data["query"]:
+                break
+            for page in data["query"]["pages"].values():
+                title = self._strip_file_prefix(page.get("title", ""))
+                coords = page.get("coordinates")
+                has_coords = bool(coords)
+                imageinfo = page.get("imageinfo", [])
+                metadata_block = (
+                    imageinfo[0].get("metadata", []) if imageinfo else []
+                )
+                has_exif_gps = self._has_metadata_gps(metadata_block)
+                results.append(
+                    {
+                        "title": title,
+                        "has_coords": has_coords,
+                        "has_exif_gps": has_exif_gps,
+                    }
+                )
+            if "continue" not in data:
+                break
+            more_params.update(data["continue"])
             time.sleep(randrange(1))
         return results
 

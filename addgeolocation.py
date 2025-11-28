@@ -19,6 +19,12 @@ def _get_credential(env_name, prompt_text, secret=False):
 
 commons_user = _get_credential("COMMONS_USER", "Commons username: ")
 commons_pass = _get_credential("COMMONS_PASS", "Commons password: ", secret=True)
+target_user = _get_credential(
+    "COMMONS_TARGET_USER",
+    f"Target uploader (default {commons_user}): ",
+)
+if not target_user:
+    target_user = commons_user
 
 c = ConfigConnection(
     commons_user,
@@ -31,7 +37,22 @@ updated = 0
 skipped_has_gps = 0
 skipped_no_gps = 0
 errors = 0
-images = c.get_images_from_category("Quality_images_by_Wilfredor")
+uploads = c.get_user_uploads_with_gps(target_user)
+needs_template = [
+    u["title"] for u in uploads if u["has_exif_gps"] and not u["has_coords"]
+]
+needs_exif = [
+    u["title"] for u in uploads if u["has_coords"] and not u["has_exif_gps"]
+]
+
+print(
+    f"Found {len(uploads)} uploads for {target_user}: "
+    f"{len(needs_exif)} need EXIF GPS, {len(needs_template)} need page template."
+)
+if needs_template:
+    print(f"Examples needing template (up to 5): {needs_template[:5]}")
+
+images = needs_exif
 random.shuffle(images)
 edit_timestamps = []
 for img in images:
