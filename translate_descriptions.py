@@ -6,6 +6,7 @@ import csv
 from pathlib import Path
 from typing import List, Optional, Dict
 import mwclient
+import os
 
 import typer
 from tqdm import tqdm
@@ -95,41 +96,34 @@ def strip_html(text: str) -> str:
 @app.command()
 def main(
     category: str = typer.Option(..., "--category", help="Category name (without 'Category:' prefix)"),
-    source_lang: str = typer.Option("en", "--source-lang", help="Source language code"),
-    targets: List[str] = typer.Option(
-        ["en", "es", "fr", "pt", "ru", "zh", "de"], "--target-lang", help="Target language codes (repeatable)"
-    ),
-    max_depth: int = typer.Option(1, "--max-depth", help="Category recursion depth"),
     apply: bool = typer.Option(False, "--apply", help="Apply edits (default: dry-run)"),
     log_csv: Optional[Path] = typer.Option(None, "--log-csv", help="Optional CSV log of actions"),
-    commons_user: str = typer.Option(
-        None,
-        "--commons-user",
-        envvar="COMMONS_USER",
-        prompt="Commons username",
-    ),
-    commons_pass: str = typer.Option(
-        None,
-        "--commons-pass",
-        envvar="COMMONS_PASS",
-        prompt=True,
-        hide_input=True,
-    ),
 ):
-    """Translate descriptions for files in a category and optionally update wikitext."""
+    """Translate descriptions for files in a category and optionally update wikitext.
+
+    Uses first language found in the description as source; targets are fixed: es, fr, pt, ru, zh, de.
+    Credentials are read from COMMONS_USER / COMMONS_PASS env vars.
+    """
     logging.basicConfig(
         level=logging.WARNING,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logging.getLogger("argostranslate").setLevel(logging.ERROR)
     logging.getLogger("argostranslate.utils").setLevel(logging.ERROR)
+    targets = ["es", "fr", "pt", "ru", "zh", "de"]
+    source_lang = None
     if argostranslate is None:
         raise typer.Exit("argostranslate not installed. Run `pip install argostranslate` first.")
     for tgt in targets:
-        ensure_model(source_lang, tgt)
+        ensure_model("en", tgt)  # models need a source; we'll validate actual source per file
+
+    commons_user = os.getenv("COMMONS_USER")
+    commons_pass = os.getenv("COMMONS_PASS")
+    if not commons_user or not commons_pass:
+        raise typer.Exit("COMMONS_USER and COMMONS_PASS must be set in env.")
 
     client = CommonsClient(commons_user, commons_pass)
-    uploads = client.list_category_files(category, max_depth=max_depth)
+    uploads = client.list_category_files(category, max_depth=1)
     # Filter JPEGs only
     uploads = [u for u in uploads if u.title.lower().endswith((".jpg", ".jpeg"))]
     progress = tqdm(total=len(uploads), desc="Translating", unit="file", colour="magenta")
@@ -199,16 +193,35 @@ def main(
                     add_log(u.title, "skipped", reason, source="none", desc=text[:2000])
                     progress.update(1)
                     continue
-                if not lang_map:
-                    lang_map = {source_lang: base_desc}
-                else:
-                    lang_map.setdefault(source_lang, base_desc)
+                src_lang = None
+                if lang_map:
+                    src_lang = next(iter(lang_map.keys()))
+                if not src_lang:
+                    skipped += 1
+                    reason = "no source language detected"
+                    progress.write(f"Skipping {u.title}: {reason}")
+                    add_log(u.title, "skipped", reason, source="none", desc=text[:2000])
+                    progress.update(1)
+                    continue
+                lang_map.setdefault(src_lang, base_desc)
                 added = 0
                 for tgt in targets:
-                    if tgt in lang_map:
+                    if tgt == src_lang or tgt in lang_map:
                         continue
-                    lang_map[tgt] = translate_text(source_lang, tgt, base_desc)
-                    added += 1
+                    try:
+                        lang_map[tgt] = translate_text(src_lang, tgt, base_desc)
+                        added += 1
+                    except RuntimeError as e:
+                        skipped += 1
+                        reason = f"missing model {src_lang}->{tgt}"
+                        progress.write(f"Skipping {u.title}: {reason}")
+                        add_log(u.title, "skipped", reason, source="wikitext/extmeta/SDC", desc=base_desc)
+                        progress.update(1)
+                        break
+                else:
+                    pass  # only executed if loop not broken
+                if added == 0:
+                    continue
                 if added == 0:
                     skipped += 1
                     reason = "all target languages present"
