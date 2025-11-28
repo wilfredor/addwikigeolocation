@@ -84,9 +84,10 @@ def main(
 ):
     """Translate descriptions for files in a category and optionally update wikitext."""
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.WARNING,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    logging.getLogger("argostranslate").setLevel(logging.WARNING)
     if argostranslate is None:
         raise typer.Exit("argostranslate not installed. Run `pip install argostranslate` first.")
     for tgt in targets:
