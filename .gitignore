@@ -18,4 +18,5 @@ dist/
 gps_scan.json
 .python-version
 gps_scan.bak
+translations_report.csv
 .DS_Store
