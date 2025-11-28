@@ -61,7 +61,7 @@ def translate_text(src_lang: str, dest_lang: str, text: str) -> str:
 def parse_lang_templates(desc: str) -> Dict[str, str]:
     """Parse {{en|...}} style language templates into a dict."""
     langs = {}
-    for m in re.finditer(r"\{\{\s*([a-zA-Z-]{2,10})\s*\|([^{}]+?)\}\}", desc):
+    for m in re.finditer(r"\{\{\s*([a-zA-Z-]{2,10})\s*\|([^{}]+?)\}\}", desc, flags=re.DOTALL):
         lang = m.group(1).strip().lower()
         content = m.group(2).strip()
         # strip possible leading numbering like 1=
@@ -85,6 +85,10 @@ def find_description_blocks(text: str):
 def replace_description_block(text: str, match: re.Match, new_desc: str) -> str:
     prefix, _, suffix = match.groups()
     return text[: match.start()] + prefix + new_desc + suffix + text[match.end() :]
+
+
+def strip_html(text: str) -> str:
+    return re.sub(r"<[^>]+>", "", text)
 
 
 @app.command()
@@ -148,22 +152,23 @@ def main(
                         base_desc = lang_map.get(source_lang) or next(iter(lang_map.values()))
                         target_match = m
                         break
-                if not base_desc and blocks:
-                    # if no lang templates, use raw text from first block
-                    raw = blocks[0].group(2).strip()
-                    # strip braces if it's a single template
-                    if raw.startswith("{{") and raw.endswith("}}"):
-                        raw = re.sub(r"^\{\{|\}\}$", "", raw).strip()
-                        # drop leading lang code if present
-                        parts = raw.split("|", 1)
-                        if len(parts) == 2:
-                            raw = parts[1].strip()
-                    if raw:
+                    elif block:
+                        raw = block
+                        if raw.startswith("{{") and raw.endswith("}}"):
+                            raw = re.sub(r"^\{\{|\}\}$", "", raw, flags=re.DOTALL).strip()
+                            parts = raw.split("|", 1)
+                            if len(parts) == 2:
+                                raw = parts[1].strip()
                         base_desc = raw
-                        target_match = blocks[0]
+                        target_match = m
+                        break
                 if not base_desc:
-                    # fallback to extmetadata or SDC
-                    base_desc = u.description or client.fetch_sdc_description(u.title, source_lang)
+                    # fallback to extmetadata or SDC (strip HTML)
+                    if u.description:
+                        base_desc = strip_html(u.description)
+                    else:
+                        desc = client.fetch_sdc_description(u.title, source_lang)
+                        base_desc = strip_html(desc) if desc else None
                     if base_desc and not target_match and blocks:
                         target_match = blocks[0]
                 if not base_desc or not target_match:
