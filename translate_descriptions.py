@@ -132,10 +132,10 @@ def main(
     # Filter JPEGs only
     uploads = [u for u in uploads if u.title.lower().endswith((".jpg", ".jpeg"))]
     progress = tqdm(total=len(uploads), desc="Translating", unit="file", colour="magenta")
-    log_rows = []
     updated = 0
     skipped = 0
     errors = 0
+    log_rows = []
     def add_log(title: str, status: str, reason: str, source: str = "", desc: str = ""):
         log_rows.append(
             {
@@ -146,6 +146,14 @@ def main(
                 "desc_raw": desc,
             }
         )
+        if log_csv:
+            # append incrementally
+            exists = log_csv.exists()
+            with log_csv.open("a", newline="") as fh:
+                writer = csv.DictWriter(fh, fieldnames=["title", "status", "reason", "source", "desc_raw"])
+                if not exists:
+                    writer.writeheader()
+                writer.writerow(log_rows[-1])
     try:
         for u in uploads:
             try:
@@ -234,12 +242,6 @@ def main(
         progress.write("Interrupted by user.")
     progress.close()
     client.cleanup()
-    if log_csv:
-        with log_csv.open("w", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=["title", "status", "reason", "source", "desc_raw"])
-            writer.writeheader()
-            for row in log_rows:
-                writer.writerow(row)
     print(f"Done. Updated (or previewed): {updated}, skipped: {skipped}, errors: {errors}")
 
 
