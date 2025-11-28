@@ -234,23 +234,28 @@ class CommonsClient:
         return uploads
 
     def fetch_wikitext(self, title: str) -> Optional[str]:
-        data = self._site.api(
-            "query",
-            prop="revisions",
-            titles=title,
-            rvprop="content",
-            rvslots="main",
-            format="json",
-        )
+        full_title = title if title.startswith("File:") else f"File:{title}"
+        try:
+            data = self._site.api(
+                "query",
+                prop="revisions",
+                titles=full_title,
+                rvprop="content",
+                rvslots="main",
+                format="json",
+            )
+        except Exception as exc:
+            self._logger.warning("Failed to fetch wikitext for %s: %s", full_title, exc)
+            return ""
         if not data or "query" not in data or "pages" not in data["query"]:
-            return None
+            return ""
         page = next(iter(data["query"]["pages"].values()))
         revisions = page.get("revisions", [])
         if not revisions:
-            return None
+            return ""
         slots = revisions[0].get("slots", {})
         main = slots.get("main", {})
-        return main.get("*") or main.get("content")
+        return main.get("*") or main.get("content") or ""
 
     def list_uploads(
         self,
