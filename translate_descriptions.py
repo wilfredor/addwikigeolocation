@@ -87,7 +87,8 @@ def main(
         level=logging.WARNING,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    logging.getLogger("argostranslate").setLevel(logging.WARNING)
+    logging.getLogger("argostranslate").setLevel(logging.ERROR)
+    logging.getLogger("argostranslate.utils").setLevel(logging.ERROR)
     if argostranslate is None:
         raise typer.Exit("argostranslate not installed. Run `pip install argostranslate` first.")
     for tgt in targets:
