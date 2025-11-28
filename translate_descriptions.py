@@ -62,6 +62,7 @@ def main(
     ),
     max_depth: int = typer.Option(1, "--max-depth", help="Category recursion depth"),
     apply: bool = typer.Option(False, "--apply", help="Apply edits (default: dry-run)"),
+    log_csv: Optional[Path] = typer.Option(None, "--log-csv", help="Optional CSV log of actions"),
     commons_user: str = typer.Option(
         None,
         "--commons-user",
@@ -91,55 +92,72 @@ def main(
     # Filter JPEGs only
     uploads = [u for u in uploads if u.title.lower().endswith((".jpg", ".jpeg"))]
     progress = tqdm(total=len(uploads), desc="Translating", unit="file", colour="magenta")
+    log_rows = []
     updated = 0
     skipped = 0
     errors = 0
-    for u in uploads:
-        try:
-            page = client._site.pages[u.title]  # type: ignore
-            text = page.text()
-            desc_match = re.search(r"description\s*=\s*([^\n]+)", text, flags=re.IGNORECASE)
-            if desc_match:
-                current_desc = desc_match.group(1).strip()
-                if "{" in current_desc or "}" in current_desc:
+    try:
+        for u in uploads:
+            try:
+                page = client._site.pages[u.title]  # type: ignore
+                text = page.text()
+                desc_match = re.search(r"description\s*=\s*([^\n]+)", text, flags=re.IGNORECASE)
+                if desc_match:
+                    current_desc = desc_match.group(1).strip()
+                    if "{" in current_desc or "}" in current_desc:
+                        skipped += 1
+                        reason = "complex description"
+                        progress.write(f"Skipping {u.title}: {reason}")
+                        log_rows.append({"title": u.title, "status": "skipped", "reason": reason})
+                        progress.update(1)
+                        continue
+                    base_desc = current_desc
+                else:
+                    base_desc = u.description
+                    if not base_desc:
+                        base_desc = client.fetch_sdc_description(u.title, source_lang)
+                    if not base_desc:
+                        skipped += 1
+                        reason = "no description field, extmetadata, or SDC"
+                        progress.write(f"Skipping {u.title}: {reason}")
+                        log_rows.append({"title": u.title, "status": "skipped", "reason": reason})
+                        progress.update(1)
+                        continue
+                translations = {}
+                for tgt in targets:
+                    translations[tgt] = translate_text(source_lang, tgt, base_desc)
+                new_text = simple_replace_description(text, source_lang, base_desc, translations)
+                if not new_text:
                     skipped += 1
-                    progress.write(f"Skipping {u.title}: complex description")
+                    reason = "could not rewrite safely"
+                    progress.write(f"Skipping {u.title}: {reason}")
+                    log_rows.append({"title": u.title, "status": "skipped", "reason": reason})
                     progress.update(1)
                     continue
-                base_desc = current_desc
-            else:
-                # fall back to extmetadata description
-                base_desc = u.description
-                if not base_desc:
-                    # try SDC caption/description
-                    base_desc = client.fetch_sdc_description(u.title, source_lang)
-                if not base_desc:
-                    skipped += 1
-                    progress.write(f"Skipping {u.title}: no description field, extmetadata, or SDC")
-                    progress.update(1)
-                    continue
-            translations = {}
-            for tgt in targets:
-                translations[tgt] = translate_text(source_lang, tgt, base_desc)
-            new_text = simple_replace_description(text, source_lang, base_desc, translations)
-            if not new_text:
-                skipped += 1
-                progress.write(f"Skipping {u.title}: could not rewrite safely")
-                progress.update(1)
-                continue
-            if apply:
-                page.save(new_text, summary=f"Add machine translation ({','.join(targets)}) to description")
-                updated += 1
-            else:
-                progress.write(f"Dry-run {u.title}: {translations}")
-                updated += 1
-        except Exception as exc:
-            errors += 1
-            progress.write(f"Error on {u.title}: {exc}")
-            logging.exception("Error translating %s", u.title)
-        progress.update(1)
+                if apply:
+                    page.save(new_text, summary=f"Add machine translation ({','.join(targets)}) to description")
+                    updated += 1
+                    log_rows.append({"title": u.title, "status": "updated", "reason": ""})
+                else:
+                    progress.write(f"Dry-run {u.title}: {translations}")
+                    updated += 1
+                    log_rows.append({"title": u.title, "status": "dry-run", "reason": ""})
+            except Exception as exc:
+                errors += 1
+                progress.write(f"Error on {u.title}: {exc}")
+                logging.exception("Error translating %s", u.title)
+                log_rows.append({"title": u.title, "status": "error", "reason": str(exc)})
+            progress.update(1)
+    except KeyboardInterrupt:
+        progress.write("Interrupted by user.")
     progress.close()
     client.cleanup()
+    if log_csv:
+        with log_csv.open("w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=["title", "status", "reason"])
+            writer.writeheader()
+            for row in log_rows:
+                writer.writerow(row)
     print(f"Done. Updated (or previewed): {updated}, skipped: {skipped}, errors: {errors}")
 
 
