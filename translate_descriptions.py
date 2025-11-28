@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import csv
 from pathlib import Path
 from typing import List, Optional
 
@@ -56,7 +57,9 @@ def translate_text(src_lang: str, dest_lang: str, text: str) -> str:
 def main(
     category: str = typer.Option(..., "--category", help="Category name (without 'Category:' prefix)"),
     source_lang: str = typer.Option("en", "--source-lang", help="Source language code"),
-    targets: List[str] = typer.Option(["es", "pt"], "--target-lang", help="Target language codes (repeatable)"),
+    targets: List[str] = typer.Option(
+        ["en", "es", "fr", "pt", "ru", "zh", "de"], "--target-lang", help="Target language codes (repeatable)"
+    ),
     max_depth: int = typer.Option(1, "--max-depth", help="Category recursion depth"),
     apply: bool = typer.Option(False, "--apply", help="Apply edits (default: dry-run)"),
     commons_user: str = typer.Option(
