@@ -233,6 +233,25 @@ class CommonsClient:
             uploads.extend(self._fetch_pages_batch(batch))
         return uploads
 
+    def fetch_wikitext(self, title: str) -> Optional[str]:
+        data = self._site.api(
+            "query",
+            prop="revisions",
+            titles=title,
+            rvprop="content",
+            rvslots="main",
+            format="json",
+        )
+        if not data or "query" not in data or "pages" not in data["query"]:
+            return None
+        page = next(iter(data["query"]["pages"].values()))
+        revisions = page.get("revisions", [])
+        if not revisions:
+            return None
+        slots = revisions[0].get("slots", {})
+        main = slots.get("main", {})
+        return main.get("*") or main.get("content")
+
     def list_uploads(
         self,
         username: str,

@@ -158,7 +158,7 @@ def main(
         for u in uploads:
             try:
                 page = client._site.pages[u.title]  # type: ignore
-                text = page.text()
+                text = client.fetch_wikitext(u.title) or page.text()
                 base_desc = None
                 lang_map = {}
                 target_match = None
