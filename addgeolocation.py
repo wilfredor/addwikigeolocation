@@ -24,6 +24,9 @@ def main(
     download_dir: Optional[Path] = typer.Option(None, "--download-dir", help="Directory to store downloads (defaults to temp)"),
     resume: bool = typer.Option(True, "--resume/--no-resume", help="Reuse existing scan file if present"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Only list actions, do not modify files"),
+    category: Optional[str] = typer.Option(None, "--category", help="Scan a category instead of uploader"),
+    max_depth: int = typer.Option(1, "--max-depth", help="Category recursion depth"),
+    author_filter: Optional[str] = typer.Option(None, "--author-filter", help="Filter by author name (defaults to target user)"),
     commons_user: str = typer.Option(
         None,
         "--commons-user",
@@ -44,11 +47,12 @@ def main(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     target = target_user or commons_user
+    author = author_filter or target
 
     client = CommonsClient(commons_user, commons_pass, download_dir=str(download_dir) if download_dir else None)
     state = load_state(state_file) if resume else ScanState()
 
-    state = scan_user_uploads(client, target, state, state_file)
+    state = scan_user_uploads(client, target, state, state_file, category=category, max_depth=max_depth, author_filter=author)
 
     print(
         f"Uploads for {target}: {len(state.needs_exif)} need EXIF GPS, "

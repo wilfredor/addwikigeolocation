@@ -67,7 +67,15 @@ def save_state(path: Path, state: ScanState):
             pass
 
 
-def scan_user_uploads(client: CommonsClient, target_user: str, state: ScanState, state_path: Path) -> ScanState:
+def scan_user_uploads(
+    client: CommonsClient,
+    target_user: str,
+    state: ScanState,
+    state_path: Path,
+    category: Optional[str] = None,
+    max_depth: int = 1,
+    author_filter: Optional[str] = None,
+) -> ScanState:
     seen_titles = {u.title for u in state.needs_exif} | set(state.needs_template)
     cont = state.scan_continue
     # Clean any stale entries without coords before processing
@@ -75,15 +83,19 @@ def scan_user_uploads(client: CommonsClient, target_user: str, state: ScanState,
     if state.needs_exif and state.needs_template and not cont:
         return state
 
-    logging.info("Scanning uploads for %s...", target_user)
+    logging.info("Scanning uploads for %s...", target_user if not category else f"category {category}")
     progress = tqdm(total=None, unit="file", desc="Scanning", colour="cyan")
     while True:
-        uploads, cont = client.list_uploads(target_user, cont_token=cont, seen_titles=seen_titles)
+        if category:
+            uploads = client.list_category_files(category, max_depth=max_depth, seen_titles=seen_titles)
+            cont = None
+        else:
+            uploads, cont = client.list_uploads(target_user, cont_token=cont, seen_titles=seen_titles)
         progress.update(len(uploads))
         for upload in uploads:
             if not upload.title.lower().endswith((".jpg", ".jpeg")):
                 continue
-            if upload.author and target_user.lower() not in upload.author.lower():
+            if author_filter and upload.author and author_filter.lower() not in upload.author.lower():
                 continue
             if upload.has_coords and not upload.has_exif_gps:
                 state.needs_exif.append(upload)

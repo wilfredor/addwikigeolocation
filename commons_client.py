@@ -265,3 +265,46 @@ class CommonsClient:
                 path.unlink()
         except OSError:
             pass
+
+    def list_category_files(
+        self, category: str, max_depth: int = 1, seen_titles: Optional[Set[str]] = None
+    ) -> List[UploadInfo]:
+        """List files in a category (recursing into subcats up to max_depth)."""
+        queue = [(category, 0)]
+        seen = set(seen_titles) if seen_titles else set()
+        results: List[UploadInfo] = []
+        while queue:
+            cat, depth = queue.pop(0)
+            cont_token = None
+            while True:
+                params = {
+                    "action": "query",
+                    "list": "categorymembers",
+                    "cmtitle": f"Category:{cat}",
+                    "cmtype": "file|subcat",
+                    "cmlimit": "max",
+                }
+                if cont_token:
+                    params.update(cont_token)
+                data = self._site.api(**params)
+                if not data or "query" not in data or "categorymembers" not in data["query"]:
+                    break
+                subcats = []
+                titles = []
+                for item in data["query"]["categorymembers"]:
+                    title = item.get("title")
+                    if item.get("ns") == 14 and depth < max_depth:
+                        subcats.append(title.replace("Category:", "", 1))
+                    elif item.get("ns") == 6 and title not in seen:
+                        titles.append(title)
+                        seen.add(title)
+                for i in range(0, len(titles), 50):
+                    batch = titles[i : i + 50]
+                    results.extend(self._fetch_pages_batch(batch))
+                for sc in subcats:
+                    queue.append((sc, depth + 1))
+                if "continue" not in data:
+                    break
+                cont_token = data["continue"]
+                time.sleep(randrange(1))
+        return results
