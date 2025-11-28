@@ -49,6 +49,8 @@ def save_state(path: Path, state: ScanState):
 def scan_user_uploads(client: CommonsClient, target_user: str, state: ScanState, state_path: Path) -> ScanState:
     seen_titles = {u.title for u in state.needs_exif} | set(state.needs_template)
     cont = state.scan_continue
+    # Clean any stale entries without coords before processing
+    state.needs_exif = [u for u in state.needs_exif if u.has_coords]
     if state.needs_exif and state.needs_template and not cont:
         return state
 

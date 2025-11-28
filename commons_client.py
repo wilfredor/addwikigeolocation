@@ -38,15 +38,15 @@ def set_gps_location(file_path: Path, lat: float, lng: float):
 
     gps_ifd = {
         piexif.GPSIFD.GPSLatitude: (
-            (lat_deg[0], 1),
-            (lat_deg[1], 1),
-            Fraction(lat_sec).limit_denominator(1000000).as_integer_ratio(),
+            (abs(lat_deg[0]), 1),
+            (abs(lat_deg[1]), 1),
+            (int(abs(lat_sec) * 1000), 1000),
         ),
         piexif.GPSIFD.GPSLatitudeRef: lat_ref,
         piexif.GPSIFD.GPSLongitude: (
-            (lng_deg[0], 1),
-            (lng_deg[1], 1),
-            Fraction(lng_sec).limit_denominator(1000000).as_integer_ratio(),
+            (abs(lng_deg[0]), 1),
+            (abs(lng_deg[1]), 1),
+            (int(abs(lng_sec) * 1000), 1000),
         ),
         piexif.GPSIFD.GPSLongitudeRef: lng_ref,
     }
