@@ -91,6 +91,7 @@ class UploadInfo:
             url=data.get("url"),
             author=data.get("author"),
             oldid=data.get("oldid"),
+            description=data.get("description"),
         )
 
 
@@ -337,6 +338,22 @@ class CommonsClient:
     def can_purge_history(self) -> bool:
         rights = self.get_user_rights()
         return "deleterevision" in rights or "suppressrevision" in rights or "filedelete" in rights
+
+    def fetch_sdc_description(self, title: str, lang: str) -> Optional[str]:
+        data = self._site.api(
+            "wbgetentities",
+            titles=f"File:{title}",
+            props="labels|descriptions",
+            languages=lang,
+            format="json",
+        )
+        if not data or "entities" not in data:
+            return None
+        entity = next(iter(data["entities"].values()))
+        # captions in SDC are labels
+        label = entity.get("labels", {}).get(lang, {}).get("value")
+        desc = entity.get("descriptions", {}).get(lang, {}).get("value")
+        return label or desc
 
     def list_category_files(
         self, category: str, max_depth: int = 1, seen_titles: Optional[Set[str]] = None

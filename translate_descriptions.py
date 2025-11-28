@@ -109,12 +109,15 @@ def main(
                 base_desc = current_desc
             else:
                 # fall back to extmetadata description
-                if not u.description:
+                base_desc = u.description
+                if not base_desc:
+                    # try SDC caption/description
+                    base_desc = client.fetch_sdc_description(u.title, source_lang)
+                if not base_desc:
                     skipped += 1
-                    progress.write(f"Skipping {u.title}: no description field or extmetadata")
+                    progress.write(f"Skipping {u.title}: no description field, extmetadata, or SDC")
                     progress.update(1)
                     continue
-                base_desc = u.description
             translations = {}
             for tgt in targets:
                 translations[tgt] = translate_text(source_lang, tgt, base_desc)
