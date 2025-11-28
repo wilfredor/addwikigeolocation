@@ -55,6 +55,34 @@ Defaults:
 - Category scan: use `--category` with `--max-depth` to recurse subcats
 - Author filter: use `--author-filter` (defaults to target user) to match extmetadata author
 
+### Restore originals (lossless, picks previous revision)
+```sh
+python restore_originals.py \
+  --since 2025-11-28T00:00:00Z \
+  --comment "Restoring original version" \
+  --apply   # remove for dry-run
+# or provide a CSV with title,oldid via --file-list restore.csv
+```
+
+### Remove geolocation (EXIF + page templates)
+```sh
+python remove_geolocation.py \
+  --category "MyCategory" --max-depth 1 \
+  --author-filter "YourName" \
+  --remove-exif --remove-page \
+  --apply    # default is dry-run
+```
+`--purge-history` is available but requires admin rights and is not automated (manual action recommended).
+
+### Translate descriptions (offline argostranslate)
+```sh
+python translate_descriptions.py \
+  --category "MyCategory" --max-depth 1 \
+  --source-lang en --target-lang es --target-lang pt \
+  --apply    # default is dry-run
+```
+Install `argostranslate` separately (`pip install argostranslate`) and download models as needed.
+
 The script prints a summary: updated, skipped (already had GPS), skipped (no GPS source), and errors.
 
 ## Notes
