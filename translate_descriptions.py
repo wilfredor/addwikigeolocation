@@ -181,7 +181,7 @@ def main(
                         target_match = m
                         break
                 # capture a sample for logging
-                sample_block = blocks[0].group(2).strip() if blocks else text[:200]
+                sample_block = blocks[0].group(2).strip() if blocks else text[:2000]
                 if not base_desc:
                     # fallback to extmetadata or SDC (strip HTML)
                     if u.description:
@@ -195,7 +195,7 @@ def main(
                     skipped += 1
                     reason = "no description field, extmetadata, or SDC"
                     progress.write(f"Skipping {u.title}: {reason}")
-                    add_log(u.title, "skipped", reason, source="none", desc=sample_block)
+                    add_log(u.title, "skipped", reason, source="none", desc=text[:2000])
                     progress.update(1)
                     continue
                 if not lang_map:
