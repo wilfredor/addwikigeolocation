@@ -143,7 +143,7 @@ def main(
                 "status": status,
                 "reason": reason,
                 "source": source,
-                "desc_preview": (desc[:200] + "...") if len(desc) > 200 else desc,
+                "desc_raw": desc,
             }
         )
     try:
@@ -236,7 +236,7 @@ def main(
     client.cleanup()
     if log_csv:
         with log_csv.open("w", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=["title", "status", "reason", "source", "desc_preview"])
+            writer = csv.DictWriter(fh, fieldnames=["title", "status", "reason", "source", "desc_raw"])
             writer.writeheader()
             for row in log_rows:
                 writer.writerow(row)
