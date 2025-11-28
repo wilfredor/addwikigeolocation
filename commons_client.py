@@ -71,6 +71,7 @@ class UploadInfo:
     lat: Optional[float] = None
     lon: Optional[float] = None
     url: Optional[str] = None
+    author: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -86,6 +87,7 @@ class UploadInfo:
             lat=data.get("lat"),
             lon=data.get("lon"),
             url=data.get("url"),
+            author=data.get("author"),
         )
 
 
@@ -149,7 +151,7 @@ class CommonsClient:
         pages = self._site.api(
             "query",
             prop="imageinfo|coordinates",
-            iiprop="metadata|url",
+            iiprop="metadata|url|extmetadata",
             titles="|".join(titles),
             format="json",
         )
@@ -164,6 +166,8 @@ class CommonsClient:
             imageinfo = page.get("imageinfo", [])
             metadata_block = imageinfo[0].get("metadata", []) if imageinfo else []
             url = imageinfo[0].get("url") if imageinfo else None
+            extmeta = imageinfo[0].get("extmetadata", {}) if imageinfo else {}
+            author = extmeta.get("Artist", {}).get("value") or extmeta.get("Author", {}).get("value")
             has_coords = coords is not None
             has_exif_gps = self._has_metadata_gps(metadata_block)
             results.append(
@@ -174,6 +178,7 @@ class CommonsClient:
                     lat=lat,
                     lon=lon,
                     url=url,
+                    author=author,
                 )
             )
         return results
