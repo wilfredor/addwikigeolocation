@@ -67,11 +67,15 @@ def process_needs_exif(
                 errors += 1
                 progress.write(f" Could not download {upload_info.title}")
             else:
-                client.write_exif(upload_info, local_path)
-                if upload:
-                    client.upload_file(upload_info, local_path)
-                updated += 1
-                edits_count -= 1
+                try:
+                    client.write_exif(upload_info, local_path)
+                    if upload:
+                        client.upload_file(upload_info, local_path)
+                    updated += 1
+                    edits_count -= 1
+                except Exception as exc:
+                    errors += 1
+                    progress.write(f"Error writing/uploading {upload_info.title}: {exc}")
             if upload_info in state.needs_exif:
                 state.needs_exif.remove(upload_info)
             save_state(state_path, state)

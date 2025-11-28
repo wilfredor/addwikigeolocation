@@ -13,12 +13,15 @@ import piexif
 import requests
 from PIL import Image
 from GPSPhoto import gpsphoto  # noqa: F401  # kept for reference/future use
+from fractions import Fraction
 
 
 def decimal_to_dms(deg: float):
-    degrees = int(deg)
-    minutes = int((deg - degrees) * 60)
-    seconds = (deg - degrees - minutes / 60) * 3600
+    deg_abs = abs(deg)
+    degrees = int(deg_abs)
+    minutes_float = (deg_abs - degrees) * 60
+    minutes = int(minutes_float)
+    seconds = (minutes_float - minutes) * 60
     return degrees, minutes, seconds
 
 
@@ -35,15 +38,15 @@ def set_gps_location(file_path: Path, lat: float, lng: float):
 
     gps_ifd = {
         piexif.GPSIFD.GPSLatitude: (
-            (abs(lat_deg[0]), 1),
+            (lat_deg[0], 1),
             (lat_deg[1], 1),
-            (int(lat_sec * 100), 6000),
+            Fraction(lat_sec).limit_denominator(1000000).as_integer_ratio(),
         ),
         piexif.GPSIFD.GPSLatitudeRef: lat_ref,
         piexif.GPSIFD.GPSLongitude: (
-            (abs(lng_deg[0]), 1),
+            (lng_deg[0], 1),
             (lng_deg[1], 1),
-            (int(lng_sec * 100), 6000),
+            Fraction(lng_sec).limit_denominator(1000000).as_integer_ratio(),
         ),
         piexif.GPSIFD.GPSLongitudeRef: lng_ref,
     }
