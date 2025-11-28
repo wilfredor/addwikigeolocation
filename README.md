@@ -2,9 +2,10 @@
 Bot/script to enrich Commons images with GPS metadata. It reads geolocation from the file page coordinates (with EXIF GPS as fallback) and writes it into the local file's EXIF GPS block, with safeguards to avoid overwriting images that already have GPS. Now organized in small modules with a Typer CLI and resumable scans.
 
 ## What it does
-- Pulls uploads from a user (via logevents), deduplicates, and partitions into:
+- Pulls files from either uploads (logevents) or a category (with optional recursion), deduplicates, and partitions into:
   - files with page coordinates but missing EXIF GPS (to update EXIF);
   - files with EXIF GPS but missing page coordinates (report only).
+- Filters to JPEGs and, optionally, by author (extmetadata `Artist`/`Author`).
 - Shuffles and processes the EXIF-missing list up to a configurable max, showing progress `[x/total]`.
 - Reads GPS from page coordinates, falling back to EXIF if needed; writes EXIF only when missing GPS.
 - Resumable scans: stores lists and continuation token in `gps_scan.json` and updates after each batch/item.
@@ -30,7 +31,8 @@ export COMMONS_USER=YourUser
 export COMMONS_PASS=YourPassword
 
 python addgeolocation.py \
-  --target-user YourUser \
+  --target-user YourUser \  # or --category "Category:Foo" --max-depth 2
+  --author-filter YourUser  # default is the target user
   --count 10 \
   --state-file gps_scan.json \
   --resume \
@@ -46,6 +48,8 @@ Defaults:
 - Dry-run: `--dry-run` to only scan/list
 - Download directory: temp dir by default; override with `--download-dir`
 - Upload: off by default; enable with `--upload`
+- Category scan: use `--category` with `--max-depth` to recurse subcats
+- Author filter: use `--author-filter` (defaults to target user) to match extmetadata author
 
 The script prints a summary: updated, skipped (already had GPS), skipped (no GPS source), and errors.
 
