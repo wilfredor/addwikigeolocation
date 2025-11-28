@@ -52,11 +52,10 @@ def set_gps_location(file_path: Path, lat: float, lng: float):
         piexif.GPSIFD.GPSLongitudeRef: lng_ref,
     }
 
-    image = Image.open(file_path)
-    exif_dict = piexif.load(image.info.get("exif", b""))
+    exif_dict = piexif.load(file_path)
     exif_dict["GPS"] = gps_ifd
     exif_bytes = piexif.dump(exif_dict)
-    image.save(file_path, exif=exif_bytes)
+    piexif.insert(exif_bytes, str(file_path))
 
 
 def valid_coordinates(lat: Optional[float], lon: Optional[float]) -> bool:
