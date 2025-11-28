@@ -275,13 +275,13 @@ class CommonsClient:
             raise ValueError(f"Invalid coordinates for {upload.title}: {upload.lat}, {upload.lon}")
         set_gps_location(local_path, upload.lat, upload.lon)
 
-    def upload_file(self, upload: UploadInfo, local_path: Path):
+    def upload_file(self, upload: UploadInfo, local_path: Path, comment: str = "Adding geolocation"):
         with open(local_path, "rb") as fh:
             self._site.upload(
                 fh,
                 filename=upload.title,
                 description=None,
-                comment="Adding geolocation",
+                comment=comment,
                 ignore=True,
             )
 

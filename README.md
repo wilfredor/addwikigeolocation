@@ -30,6 +30,10 @@ Bot/script to enrich Commons images with GPS metadata. It reads geolocation from
 export COMMONS_USER=YourUser
 export COMMONS_PASS=YourPassword
 
+# Restore originals from list (CSV title,oldid or plain text titles)
+python restore_originals.py --file-list restore.csv --comment "Restoring original version"
+
+# Normal geolocation run
 python addgeolocation.py \
   --target-user YourUser \  # or --category "Category:Foo" --max-depth 2
   --author-filter YourUser  # default is the target user
