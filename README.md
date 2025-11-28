@@ -5,10 +5,11 @@ Bot/script to enrich Commons images with GPS metadata. It reads geolocation alre
 - Pulls uploads from a user, partitions them into:
   - files with page coordinates but missing EXIF GPS (to update EXIF);
   - files with EXIF GPS but missing page coordinates (report only, for template addition).
-- Shuffles the list to update EXIF, processes up to `COUNT_NUMBER` items.
+- Shuffles the list to update EXIF, processes up to a configurable max.
 - Reads GPS from the file page coordinates (`prop=coordinates`), falling back to `extmetadata` only if needed.
 - Writes GPS into EXIF only when the EXIF is missing GPS; otherwise skips. Logs counts of updated/skipped/errored.
 - Uses jittered sleeps and a per-minute cap to avoid hammering the API.
+- Saves scan results (needs EXIF / needs template) to a JSON file; supports resume and dry-run.
 
 ## Requirements
 - Python 3.9+
@@ -29,13 +30,19 @@ Bot/script to enrich Commons images with GPS metadata. It reads geolocation alre
 export COMMONS_USER=YourUser
 export COMMONS_PASS=YourPassword
 
-python addgeolocation.py
+python addgeolocation.py \
+  --target-user YourUser \
+  --count 10 \
+  --output gps_scan.json \
+  --resume \
+  # --dry-run  # use to only list actions
 ```
 
 Defaults:
-- Category: `Quality_images_by_Wilfredor` (edit `addgeolocation.py` to change)
-- Max edits per run: `COUNT_NUMBER` (19)
-- Base sleep: `SLEEP_SECCONDS` (10s) with jitter; per-minute cap: `MAX_EDITS_PER_MIN` (30)
+- Max edits per run: `--count` (default 19)
+- Base sleep: `--sleep` (default 10s) with jitter; per-minute cap: `--max-edits-per-min` (default 30)
+- Scan file: `--output` (default `gps_scan.json`), use `--resume` to reuse it
+- Dry-run: `--dry-run` to only list counts and sample items
 
 The script prints a summary: updated, skipped (already had GPS), skipped (no GPS source), and errors.
 

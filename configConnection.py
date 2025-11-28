@@ -85,6 +85,12 @@ class ConfigConnection:
         self._filename = None
         self._login = login
         self._password = password
+        self._s = requests.Session()
+        self._s.headers.update(
+            {
+                "User-Agent": "AddGeoLocationBot/1.0 (https://github.com/wilfredor/addwikigeolocation; wilfredor@gmail.com)"
+            }
+        )
         # Obtain a login token
         params = {
             "action": "query",
@@ -92,7 +98,6 @@ class ConfigConnection:
             "type": "login",
             "format": "json",
         }
-        self._s = requests.Session()
         r = self._s.get(url=self._url, params=params)
         data = r.json()
         self._login_token = data["query"]["tokens"]["logintoken"]
@@ -125,10 +130,17 @@ class ConfigConnection:
     def _strip_file_prefix(title: str) -> str:
         return title.replace("File:", "", 1) if title.startswith("File:") else title
 
+    @staticmethod
+    def _strip_file_prefix(title: str) -> str:
+        return title.replace("File:", "", 1) if title.startswith("File:") else title
+
     def _request_json_with_backoff(
         self, method: str, url: str, **kwargs: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """Basic backoff for API limit / transient failures."""
+        if "params" in kwargs:
+            kwargs["params"] = kwargs.get("params") or {}
+            kwargs["params"].setdefault("maxlag", 5)
         for attempt in range(1, self._max_retries + 1):
             try:
                 r = self._s.request(method, url, timeout=10, **kwargs)
@@ -326,6 +338,10 @@ class ConfigConnection:
             time.sleep(randrange(1))
         return results
 
+    @staticmethod
+    def _valid_coordinates(lat: float, lon: float) -> bool:
+        return lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180
+
     def _has_metadata_gps(self, metadata_block: list) -> bool:
         return (
             self._get_lat_lon_gps("GPSLatitude", metadata_block) is not None
@@ -383,6 +399,9 @@ class ConfigConnection:
             gps_info = self._pagecoords or self._get_extmetadata_gps()
             if not gps_info:
                 print("No GPS info available to write for", self._filename)
+                return
+            if not self._valid_coordinates(gps_info[0], gps_info[1]):
+                print("Invalid GPS info, skipping", self._filename, gps_info)
                 return
             print("External GPS", gps_info)
             set_gps_location(self._filename, gps_info[0], gps_info[1])
