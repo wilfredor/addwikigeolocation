@@ -23,6 +23,7 @@ dependencies = [
 addwikigeolocation = "addgeolocation:app"
 restore_originals = "restore_originals:app"
 translate_descriptions = "translate_descriptions:app"
+remove_geolocation = "remove_geolocation:app"
 
 [tool.setuptools]
 py-modules = [
