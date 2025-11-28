@@ -111,7 +111,8 @@ def main():
     images = list(needs_exif)
     random.shuffle(images)
     edit_timestamps = []
-    for img in images:
+    total_images = len(images)
+    for idx, img in enumerate(images, start=1):
         c.set_filename(img)
         try:
             if not c.can_set_metadata_location_gps():
@@ -126,7 +127,7 @@ def main():
                 continue
 
             try:
-                print("processing: ", c._filename)
+                print(f"[{idx}/{total_images}] processing: {c._filename}")
                 c.download_file_new()
                 c.set_metadata_location_gps()
                 if args.upload:

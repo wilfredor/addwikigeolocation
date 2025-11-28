@@ -225,6 +225,8 @@ class ConfigConnection:
         return lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180
 
     def _has_metadata_gps(self, metadata_block: list) -> bool:
+        if not metadata_block:
+            return False
         return (
             self._get_lat_lon_gps("GPSLatitude", metadata_block) is not None
             and self._get_lat_lon_gps("GPSLongitude", metadata_block) is not None
@@ -234,13 +236,11 @@ class ConfigConnection:
         """Return uploads for a user with flags for page coords and EXIF GPS."""
         base_params = {
             "action": "query",
-            "generator": "usercontribs",
-            "gucuser": username,
-            "gucnamespace": "6",
-            "guclimit": "max",
-            "prop": "imageinfo|coordinates",
-            "iiprop": "metadata|url",
-            "format": "json",
+            "list": "usercontribs",
+            "ucuser": username,
+            "ucnamespace": "6",
+            "uclimit": "max",
+            "ucprop": "title",
         }
         base_params.update(params)
         results = []
@@ -248,27 +248,40 @@ class ConfigConnection:
         total = 0
         while True:
             data = self._site.api(**more_params)
-            if not data or "query" not in data or "pages" not in data["query"]:
+            if not data or "query" not in data or "usercontribs" not in data["query"]:
                 break
-            for page in data["query"]["pages"].values():
-                title = self._strip_file_prefix(page.get("title", ""))
-                coords = page.get("coordinates")
-                has_coords = bool(coords)
-                imageinfo = page.get("imageinfo", [])
-                metadata_block = (
-                    imageinfo[0].get("metadata", []) if imageinfo else []
+            titles = [c["title"] for c in data["query"]["usercontribs"]]
+            # Fetch metadata/coords in batches
+            for i in range(0, len(titles), 50):
+                batch = titles[i : i + 50]
+                pages = self._site.api(
+                    "query",
+                    prop="imageinfo|coordinates",
+                    iiprop="metadata|url",
+                    titles="|".join(batch),
+                    format="json",
                 )
-                has_exif_gps = self._has_metadata_gps(metadata_block)
-                results.append(
-                    {
-                        "title": title,
-                        "has_coords": has_coords,
-                        "has_exif_gps": has_exif_gps,
-                    }
-                )
-                total += 1
-                if total % 500 == 0:
-                    print(f" Scanned {total} uploads so far...")
+                if not pages or "query" not in pages or "pages" not in pages["query"]:
+                    continue
+                for page in pages["query"]["pages"].values():
+                    title = self._strip_file_prefix(page.get("title", ""))
+                    coords = page.get("coordinates")
+                    has_coords = bool(coords)
+                    imageinfo = page.get("imageinfo", [])
+                    metadata_block = (
+                        imageinfo[0].get("metadata", []) if imageinfo else []
+                    )
+                    has_exif_gps = self._has_metadata_gps(metadata_block)
+                    results.append(
+                        {
+                            "title": title,
+                            "has_coords": has_coords,
+                            "has_exif_gps": has_exif_gps,
+                        }
+                    )
+                    total += 1
+                    if total % 500 == 0:
+                        print(f" Scanned {total} uploads so far...")
             if "continue" not in data:
                 break
             more_params.update(data["continue"])
