@@ -80,7 +80,9 @@ def main():
             needs_template = scan.get("needs_template", [])
 
     if not needs_exif and not needs_template:
+        print(f"Scanning uploads for {target_user}...")
         uploads = c.get_user_uploads_with_gps(target_user)
+        print(f"Scan complete. Found {len(uploads)} uploads.")
         needs_template = [
             u["title"] for u in uploads if u["has_exif_gps"] and not u["has_coords"]
         ]

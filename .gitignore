@@ -1,3 +1,19 @@
 # Local secrets and config
 .env
 config.local.json
+
+# Python/build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+env/
+venv/
+build/
+dist/
+
+# Tooling/output
+gps_scan.json
+.DS_Store
