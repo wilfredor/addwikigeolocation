@@ -206,6 +206,8 @@ class ConfigConnection:
 
     @staticmethod
     def _get_lat_lon_gps(gpsname, json_image_details):
+        if not json_image_details:
+            return None
         lat_lon = [
             image["value"]
             for image in json_image_details
@@ -232,10 +234,10 @@ class ConfigConnection:
         """Return uploads for a user with flags for page coords and EXIF GPS."""
         base_params = {
             "action": "query",
-            "generator": "allimages",
-            "gaiuser": username,
-            "gailimit": "max",
-            "gaisort": "timestamp",
+            "generator": "usercontribs",
+            "gucuser": username,
+            "gucnamespace": "6",
+            "guclimit": "max",
             "prop": "imageinfo|coordinates",
             "iiprop": "metadata|url",
             "format": "json",
@@ -243,6 +245,7 @@ class ConfigConnection:
         base_params.update(params)
         results = []
         more_params = dict(base_params)
+        total = 0
         while True:
             data = self._site.api(**more_params)
             if not data or "query" not in data or "pages" not in data["query"]:
@@ -263,6 +266,9 @@ class ConfigConnection:
                         "has_exif_gps": has_exif_gps,
                     }
                 )
+                total += 1
+                if total % 500 == 0:
+                    print(f" Scanned {total} uploads so far...")
             if "continue" not in data:
                 break
             more_params.update(data["continue"])
