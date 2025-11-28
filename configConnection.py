@@ -97,8 +97,9 @@ class ConfigConnection:
             }
         )
         self._site = mwclient.Site(
-            ("https", "commons.wikimedia.org"),
+            host="commons.wikimedia.org",
             path="/w/",
+            scheme="https",
             clients_useragent="AddGeoLocationBot/1.0 (https://github.com/wilfredor/addwikigeolocation; wilfredor@gmail.com)",
         )
         self._site.login(self._login, self._password)
@@ -234,6 +235,7 @@ class ConfigConnection:
             "generator": "allimages",
             "gaiuser": username,
             "gailimit": "max",
+            "aisort": "timestamp",
             "prop": "imageinfo|coordinates",
             "iiprop": "metadata|url",
             "format": "json",
