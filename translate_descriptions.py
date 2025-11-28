@@ -76,15 +76,15 @@ def build_multilingual_desc(lang_map: Dict[str, str]) -> str:
     return "{{Multilingual description|" + "|".join(parts) + "}}"
 
 
-def replace_description_block(text: str, new_desc: str) -> Optional[str]:
-    """Replace the description= block (multiline) in the Information template."""
+def find_description_blocks(text: str):
     pattern = re.compile(r"(description\s*=\s*)(.*?)(\n\|[a-zA-Z_]+\s*=|\n\}\})", re.IGNORECASE | re.DOTALL)
-    m = pattern.search(text)
-    if not m:
-        return None
-    prefix, _, suffix = m.groups()
-    # suffix already includes leading newline
-    return text[: m.start()] + prefix + new_desc + suffix + text[m.end() :]
+    for m in pattern.finditer(text):
+        yield m
+
+
+def replace_description_block(text: str, match: re.Match, new_desc: str) -> str:
+    prefix, _, suffix = match.groups()
+    return text[: match.start()] + prefix + new_desc + suffix + text[match.end() :]
 
 
 @app.command()
@@ -137,28 +137,29 @@ def main(
             try:
                 page = client._site.pages[u.title]  # type: ignore
                 text = page.text()
-                # Try to extract description block (multiline)
-                desc_block_match = re.search(r"(description\s*=\s*)(.*?)(\n\|[a-zA-Z_]+\s*=|\n\}\})", text, flags=re.IGNORECASE | re.DOTALL)
                 base_desc = None
                 lang_map = {}
-                if desc_block_match:
-                    block = desc_block_match.group(2).strip()
+                target_match = None
+                for m in find_description_blocks(text):
+                    block = m.group(2).strip()
                     lang_map = parse_lang_templates(block)
                     if lang_map:
-                        base_desc = lang_map.get(source_lang)
+                        base_desc = lang_map.get(source_lang) or next(iter(lang_map.values()))
+                        target_match = m
+                        break
                 if not base_desc:
                     # fallback to extmetadata or SDC
-                    base_desc = u.description
-                    if not base_desc:
-                        base_desc = client.fetch_sdc_description(u.title, source_lang)
-                if not base_desc:
+                    base_desc = u.description or client.fetch_sdc_description(u.title, source_lang)
+                    if base_desc:
+                        # use first description block if exists, else cannot insert
+                        target_match = next(find_description_blocks(text), None)
+                if not base_desc or not target_match:
                     skipped += 1
                     reason = "no description field, extmetadata, or SDC"
                     progress.write(f"Skipping {u.title}: {reason}")
                     log_rows.append({"title": u.title, "status": "skipped", "reason": reason})
                     progress.update(1)
                     continue
-                # build or extend lang map
                 if not lang_map:
                     lang_map = {source_lang: base_desc}
                 else:
@@ -177,7 +178,7 @@ def main(
                     progress.update(1)
                     continue
                 new_desc = build_multilingual_desc(lang_map)
-                new_text = replace_description_block(text, new_desc)
+                new_text = replace_description_block(text, target_match, new_desc)
                 if not new_text:
                     skipped += 1
                     reason = "could not rewrite safely"
