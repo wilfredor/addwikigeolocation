@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from random import randrange
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Set
 
 import mwclient
 import piexif

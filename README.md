@@ -13,9 +13,9 @@ Bot/script to enrich Commons images with GPS metadata. It reads geolocation from
 
 ## Requirements
 - Python 3.9+
-- Packages: `requests`, `Pillow`, `piexif`, `GPSPhoto`, `mwclient`, `typer`
+- Packages: `requests`, `Pillow`, `piexif`, `GPSPhoto`, `mwclient`, `typer`, `tqdm`
   ```sh
-  pip install requests Pillow piexif GPSPhoto mwclient typer
+  pip install requests Pillow piexif GPSPhoto mwclient typer tqdm
   ```
 
 ## Credentials
