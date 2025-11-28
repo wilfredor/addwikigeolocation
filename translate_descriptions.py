@@ -77,9 +77,9 @@ def build_multilingual_desc(lang_map: Dict[str, str]) -> str:
 
 
 def find_description_blocks(text: str):
+    # capture description= ... until next |foo= or end of template
     pattern = re.compile(r"(description\s*=\s*)(.*?)(\n\|[a-zA-Z_]+\s*=|\n\}\})", re.IGNORECASE | re.DOTALL)
-    for m in pattern.finditer(text):
-        yield m
+    return list(pattern.finditer(text))
 
 
 def replace_description_block(text: str, match: re.Match, new_desc: str) -> str:
@@ -140,19 +140,32 @@ def main(
                 base_desc = None
                 lang_map = {}
                 target_match = None
-                for m in find_description_blocks(text):
+                blocks = find_description_blocks(text)
+                for m in blocks:
                     block = m.group(2).strip()
                     lang_map = parse_lang_templates(block)
                     if lang_map:
                         base_desc = lang_map.get(source_lang) or next(iter(lang_map.values()))
                         target_match = m
                         break
+                if not base_desc and blocks:
+                    # if no lang templates, use raw text from first block
+                    raw = blocks[0].group(2).strip()
+                    # strip braces if it's a single template
+                    if raw.startswith("{{") and raw.endswith("}}"):
+                        raw = re.sub(r"^\{\{|\}\}$", "", raw).strip()
+                        # drop leading lang code if present
+                        parts = raw.split("|", 1)
+                        if len(parts) == 2:
+                            raw = parts[1].strip()
+                    if raw:
+                        base_desc = raw
+                        target_match = blocks[0]
                 if not base_desc:
                     # fallback to extmetadata or SDC
                     base_desc = u.description or client.fetch_sdc_description(u.title, source_lang)
-                    if base_desc:
-                        # use first description block if exists, else cannot insert
-                        target_match = next(find_description_blocks(text), None)
+                    if base_desc and not target_match and blocks:
+                        target_match = blocks[0]
                 if not base_desc or not target_match:
                     skipped += 1
                     reason = "no description field, extmetadata, or SDC"
