@@ -120,6 +120,7 @@ class CommonsClient:
             self._download_dir = Path(self._download_dir_ctx.name)
         self.download_dir = self._download_dir
         self._logger = logging.getLogger(__name__)
+        self._user_rights: Optional[set] = None
 
     def close(self):
         if self._download_dir_ctx:
@@ -321,6 +322,18 @@ class CommonsClient:
                 path.unlink()
         except OSError:
             pass
+
+    def get_user_rights(self) -> set:
+        if self._user_rights is not None:
+            return self._user_rights
+        data = self._site.api("query", meta="userinfo", uiprop="rights", format="json")
+        rights = set(data.get("query", {}).get("userinfo", {}).get("rights", []))
+        self._user_rights = rights
+        return rights
+
+    def can_purge_history(self) -> bool:
+        rights = self.get_user_rights()
+        return "deleterevision" in rights or "suppressrevision" in rights or "filedelete" in rights
 
     def list_category_files(
         self, category: str, max_depth: int = 1, seen_titles: Optional[Set[str]] = None

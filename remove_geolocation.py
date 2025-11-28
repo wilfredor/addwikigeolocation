@@ -72,6 +72,7 @@ def main(
     author_filter: Optional[str] = typer.Option(None, "--author-filter", help="Filter by author name (extmetadata)"),
     remove_exif: bool = typer.Option(True, "--remove-exif/--keep-exif", help="Remove EXIF GPS"),
     remove_page: bool = typer.Option(True, "--remove-page/--keep-page", help="Remove page geolocation templates"),
+    purge_history: bool = typer.Option(False, "--purge-history", help="Admin only: purge older file revisions, keep latest"),
     apply: bool = typer.Option(False, "--apply", help="Apply changes (default: dry-run)"),
     commons_user: str = typer.Option(
         None,
@@ -145,6 +146,11 @@ def main(
             time.sleep(60 - (now - timestamps[0]))
         timestamps.append(time.time())
     progress.close()
+    if purge_history:
+        if not client.can_purge_history():
+            logging.warning("purge-history requested but current user lacks rights (admin needed). Skipping.")
+        else:
+            logging.warning("purge-history flag is set. Purging old revisions is not implemented for safety; do it manually.")
     client.cleanup()
     print(f"Done. Processed: {len(uploads)}, successful/preview: {done}, errors: {errors}, apply={apply}")
 
