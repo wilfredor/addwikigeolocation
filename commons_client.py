@@ -340,13 +340,18 @@ class CommonsClient:
         return "deleterevision" in rights or "suppressrevision" in rights or "filedelete" in rights
 
     def fetch_sdc_description(self, title: str, lang: str) -> Optional[str]:
-        data = self._site.api(
-            "wbgetentities",
-            titles=f"File:{title}",
-            props="labels|descriptions",
-            languages=lang,
-            format="json",
-        )
+        try:
+            data = self._site.api(
+                "wbgetentities",
+                titles=f"File:{title}",
+                sites="commonswiki",
+                props="labels|descriptions",
+                languages=lang,
+                format="json",
+            )
+        except Exception as exc:
+            self._logger.warning("SDC fetch failed for %s: %s", title, exc)
+            return None
         if not data or "entities" not in data:
             return None
         entity = next(iter(data["entities"].values()))
