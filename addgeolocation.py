@@ -43,10 +43,11 @@ def _load_scan(path: Path):
     return None
 
 
-def _save_scan(path: Path, needs_exif, needs_template):
+def _save_scan(path: Path, needs_exif, needs_template, scan_continue=None):
     payload = {
         "needs_exif": list(needs_exif),
         "needs_template": list(needs_template),
+        "scan_continue": scan_continue,
     }
     with path.open("w") as fh:
         json.dump(payload, fh, indent=2)
@@ -73,23 +74,38 @@ def main():
     output_path = Path(args.output)
     needs_exif = []
     needs_template = []
+    scan_continue = None
     if args.resume:
         scan = _load_scan(output_path)
         if scan:
             needs_exif = scan.get("needs_exif", [])
             needs_template = scan.get("needs_template", [])
+            scan_continue = scan.get("scan_continue")
 
-    if not needs_exif and not needs_template:
+    if not needs_exif and not needs_template or scan_continue:
         print(f"Scanning uploads for {target_user}...")
-        uploads = c.get_user_uploads_with_gps(target_user)
-        print(f"Scan complete. Found {len(uploads)} uploads.")
-        needs_template = [
-            u["title"] for u in uploads if u["has_exif_gps"] and not u["has_coords"]
-        ]
-        needs_exif = [
-            u["title"] for u in uploads if u["has_coords"] and not u["has_exif_gps"]
-        ]
-        _save_scan(output_path, needs_exif, needs_template)
+        seen_titles = set(needs_exif) | set(needs_template)
+        while True:
+            uploads, scan_continue = c.get_user_uploads_with_gps(
+                target_user, cont_token=scan_continue, seen_titles=seen_titles
+            )
+            print(f" Scan batch complete. Found {len(uploads)} items.")
+            needs_template.extend(
+                u["title"]
+                for u in uploads
+                if u["has_exif_gps"] and not u["has_coords"]
+            )
+            needs_exif.extend(
+                u["title"] for u in uploads if u["has_coords"] and not u["has_exif_gps"]
+            )
+            seen_titles.update(needs_template)
+            seen_titles.update(needs_exif)
+            _save_scan(output_path, needs_exif, needs_template, scan_continue)
+            if not scan_continue or not uploads:
+                break
+        print(
+            f"Scan complete. Found {len(needs_exif) + len(needs_template)} uploads (needs_exif={len(needs_exif)}, needs_template={len(needs_template)})."
+        )
 
     print(
         f"Uploads for {target_user}: {len(needs_exif)} need EXIF GPS, "

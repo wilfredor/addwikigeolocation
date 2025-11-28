@@ -11,7 +11,7 @@ import sys
 from fractions import Fraction
 import piexif
 import struct
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Iterable
 from pathlib import Path
 import mwclient
 import mwclient
@@ -232,61 +232,73 @@ class ConfigConnection:
             and self._get_lat_lon_gps("GPSLongitude", metadata_block) is not None
         )
 
-    def get_user_uploads_with_gps(self, username: str, params: dict = {}) -> list:
+    def _fetch_pages_batch(self, titles: Iterable[str]) -> list:
+        """Fetch coords and metadata for up to 50 titles."""
+        pages = self._site.api(
+            "query",
+            prop="imageinfo|coordinates",
+            iiprop="metadata|url",
+            titles="|".join(titles),
+            format="json",
+        )
+        results = []
+        if not pages or "query" not in pages or "pages" not in pages["query"]:
+            return results
+        for page in pages["query"]["pages"].values():
+            title = self._strip_file_prefix(page.get("title", ""))
+            coords = page.get("coordinates")
+            has_coords = bool(coords)
+            imageinfo = page.get("imageinfo", [])
+            metadata_block = imageinfo[0].get("metadata", []) if imageinfo else []
+            has_exif_gps = self._has_metadata_gps(metadata_block)
+            results.append(
+                {
+                    "title": title,
+                    "has_coords": has_coords,
+                    "has_exif_gps": has_exif_gps,
+                }
+            )
+        return results
+
+    def get_user_uploads_with_gps(
+        self, username: str, cont_token: Optional[dict] = None, seen_titles=None
+    ) -> tuple[list, Optional[dict]]:
         """Return uploads for a user with flags for page coords and EXIF GPS."""
         base_params = {
             "action": "query",
-            "list": "usercontribs",
-            "ucuser": username,
-            "ucnamespace": "6",
-            "uclimit": "max",
-            "ucprop": "title",
+            "list": "logevents",
+            "letype": "upload",
+            "leuser": username,
+            "leprop": "title",
+            "lelimit": "max",
         }
-        base_params.update(params)
+        if cont_token:
+            base_params.update(cont_token)
         results = []
-        more_params = dict(base_params)
+        seen = set(seen_titles) if seen_titles else set()
         total = 0
         while True:
-            data = self._site.api(**more_params)
-            if not data or "query" not in data or "usercontribs" not in data["query"]:
-                break
-            titles = [c["title"] for c in data["query"]["usercontribs"]]
-            # Fetch metadata/coords in batches
-            for i in range(0, len(titles), 50):
-                batch = titles[i : i + 50]
-                pages = self._site.api(
-                    "query",
-                    prop="imageinfo|coordinates",
-                    iiprop="metadata|url",
-                    titles="|".join(batch),
-                    format="json",
-                )
-                if not pages or "query" not in pages or "pages" not in pages["query"]:
-                    continue
-                for page in pages["query"]["pages"].values():
-                    title = self._strip_file_prefix(page.get("title", ""))
-                    coords = page.get("coordinates")
-                    has_coords = bool(coords)
-                    imageinfo = page.get("imageinfo", [])
-                    metadata_block = (
-                        imageinfo[0].get("metadata", []) if imageinfo else []
-                    )
-                    has_exif_gps = self._has_metadata_gps(metadata_block)
-                    results.append(
-                        {
-                            "title": title,
-                            "has_coords": has_coords,
-                            "has_exif_gps": has_exif_gps,
-                        }
-                    )
-                    total += 1
-                    if total % 500 == 0:
-                        print(f" Scanned {total} uploads so far...")
+            data = self._site.api(**base_params)
+            if not data or "query" not in data or "logevents" not in data["query"]:
+                return results, None
+            titles = [
+                ev.get("title") for ev in data["query"]["logevents"] if ev.get("title")
+            ]
+            new_titles = [t for t in titles if t not in seen]
+            seen.update(new_titles)
+            for i in range(0, len(new_titles), 50):
+                batch = new_titles[i : i + 50]
+                batch_results = self._fetch_pages_batch(batch)
+                results.extend(batch_results)
+                total += len(batch_results)
+                if total % 500 == 0:
+                    print(f" Scanned {total} uploads so far...")
             if "continue" not in data:
-                break
-            more_params.update(data["continue"])
+                return results, None
+            base_params.update(data["continue"])
+            cont_token = data["continue"]
             time.sleep(randrange(1))
-        return results
+        return results, cont_token
 
     def can_set_metadata_location_gps(self):
         # Only write when GPS exists (page coords preferred, metadata fallback) and EXIF is missing.
