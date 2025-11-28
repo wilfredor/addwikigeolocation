@@ -1,21 +1,21 @@
 # addwikigeolocation
-Bot/script to enrich Commons images with GPS metadata. It reads geolocation already present on Commons (extmetadata) and writes it into the local file's EXIF GPS block, with safeguards to avoid overwriting images that already have GPS.
+Bot/script to enrich Commons images with GPS metadata. It reads geolocation from the file page coordinates (with EXIF GPS as fallback) and writes it into the local file's EXIF GPS block, with safeguards to avoid overwriting images that already have GPS.
 
 ## What it does
 - Pulls uploads from a user, partitions them into:
   - files with page coordinates but missing EXIF GPS (to update EXIF);
   - files with EXIF GPS but missing page coordinates (report only, for template addition).
 - Shuffles the list to update EXIF, processes up to a configurable max.
-- Reads GPS from the file page coordinates (`prop=coordinates`), falling back to `extmetadata` only if needed.
+- Reads GPS from the file page coordinates (`prop=coordinates`), falling back to EXIF metadata only if needed.
 - Writes GPS into EXIF only when the EXIF is missing GPS; otherwise skips. Logs counts of updated/skipped/errored.
 - Uses jittered sleeps and a per-minute cap to avoid hammering the API.
 - Saves scan results (needs EXIF / needs template) to a JSON file; supports resume and dry-run.
 
 ## Requirements
 - Python 3.9+
-- Packages: `requests`, `Pillow`, `piexif`, `GPSPhoto`
+- Packages: `requests`, `Pillow`, `piexif`, `GPSPhoto`, `mwclient`
   ```sh
-  pip install requests Pillow piexif GPSPhoto
+  pip install requests Pillow piexif GPSPhoto mwclient
   ```
 
 ## Credentials

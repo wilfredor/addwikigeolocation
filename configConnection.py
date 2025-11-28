@@ -12,6 +12,7 @@ from fractions import Fraction
 import piexif
 import struct
 from typing import Any, Dict, Optional
+import mwclient
 
 
 def decimal_to_dms(deg):
@@ -91,105 +92,56 @@ class ConfigConnection:
                 "User-Agent": "AddGeoLocationBot/1.0 (https://github.com/wilfredor/addwikigeolocation; wilfredor@gmail.com)"
             }
         )
-        # Obtain a login token
-        params = {
-            "action": "query",
-            "meta": "tokens",
-            "type": "login",
-            "format": "json",
-        }
-        r = self._s.get(url=self._url, params=params)
-        data = r.json()
-        self._login_token = data["query"]["tokens"]["logintoken"]
-        params = {
-            "action": "login",
-            "lgname": self._login,
-            "lgpassword": self._password,
-            "lgtoken": self._login_token,
-            "format": "json",
-        }
-        r = self._s.post(self._url, data=params)
-
-        # Obtain a CSRF token
-        params = {"action": "query", "meta": "tokens", "format": "json"}
-        r = self._s.get(url=self._url, params=params)
-        data = r.json()
-        self._csrf_token = data["query"]["tokens"]["csrftoken"]
+        self._site = mwclient.Site(
+            ("https", "commons.wikimedia.org"),
+            path="/w/",
+            clients_useragent="AddGeoLocationBot/1.0 (https://github.com/wilfredor/addwikigeolocation; wilfredor@gmail.com)",
+        )
+        self._site.login(self._login, self._password)
+        self._csrf_token = self._site.get_token("csrf")
 
         self._info = None
         self._metadata = None
-        self._extmetadata = None
         self._pagecoords = None
 
-        self._METADATA_TYPE = "metadata"
-        self._EXTMETADATA_TYPE = "extmetadata"
-        self._max_retries = 3
-        self._backoff_seconds = 2
-
     @staticmethod
     def _strip_file_prefix(title: str) -> str:
         return title.replace("File:", "", 1) if title.startswith("File:") else title
 
-    @staticmethod
-    def _strip_file_prefix(title: str) -> str:
-        return title.replace("File:", "", 1) if title.startswith("File:") else title
-
-    def _request_json_with_backoff(
-        self, method: str, url: str, **kwargs: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Basic backoff for API limit / transient failures."""
-        if "params" in kwargs:
-            kwargs["params"] = kwargs.get("params") or {}
-            kwargs["params"].setdefault("maxlag", 5)
-        for attempt in range(1, self._max_retries + 1):
-            try:
-                r = self._s.request(method, url, timeout=10, **kwargs)
-                if r.status_code in (429, 502, 503, 504):
-                    raise requests.exceptions.RetryError(f"HTTP {r.status_code}")
-                return r.json()
-            except (requests.exceptions.RequestException, ValueError) as exc:
-                if attempt >= self._max_retries:
-                    print(f"API request failed after retries: {exc}")
-                    return None
-                time.sleep(self._backoff_seconds * attempt)
+    def _fetch_page_data(self, filename: str) -> Dict[str, Any]:
+        title = f"File:{filename}"
+        data = self._site.api(
+            "query",
+            prop="coordinates|imageinfo",
+            iiprop="metadata|url",
+            titles=title,
+            format="json",
+        )
+        if not data or "query" not in data or "pages" not in data["query"]:
+            return {}
+        page = next(iter(data["query"]["pages"].values()))
+        coords = None
+        if "coordinates" in page:
+            first = page["coordinates"][0]
+            coords = [first.get("lat"), first.get("lon")]
+        imageinfo = page.get("imageinfo", [])
+        metadata = imageinfo[0].get("metadata", []) if imageinfo else []
+        url = imageinfo[0].get("url") if imageinfo else None
+        return {"coords": coords, "metadata": metadata, "url": url}
 
     def set_filename(self, value):
         self._filename = value
-        self._info = self._get_image_info()
-        self._metadata = self._get_metadata_gps()
-        self._extmetadata = self._get_extmetadata_gps()
-        self._pagecoords = self._get_page_coordinates()
+        page_data = self._fetch_page_data(value)
+        self._metadata = page_data.get("metadata")
+        self._pagecoords = page_data.get("coords")
+        self._info = {"url": page_data.get("url")} if page_data.get("url") else None
         time.sleep(randrange(2))
 
     def metadata(self):
         return self._metadata
 
-    def extmetadata(self):
-        return self._extmetadata
-
     def info(self):
         return self._info
-
-    def _get_image_info(self):
-        if self._filename is not None:
-            params = {
-                "action": "query",
-                "lgname": self._login,
-                "lgpassword": self._password,
-                "lgtoken": self._login_token,
-                "format": "json",
-                "list": "allimages",
-                "aifrom": self._filename,
-                "aito": self._filename,
-            }
-
-            data = self._request_json_with_backoff("post", self._url, data=params)
-            if data and "query" in data and "allimages" in data["query"]:
-                images = data["query"]["allimages"]
-                for img in images:
-                    if img["name"] is not None:
-                        return img
-        return None
 
     def download_file_new(self):
         """Downloads a file from a URL and saves it with the specified filename."""
@@ -230,48 +182,13 @@ class ConfigConnection:
             print(f"Error downloading the file: {e}")
 
     def _get_metadata_gps(self):
-        return self._get_image_location_gps(self._METADATA_TYPE)
-
-    def _get_extmetadata_gps(self):
-        return self._get_image_location_gps(self._EXTMETADATA_TYPE)
-
-    def _get_image_location_gps(self, metatype):
-        start_of_end_point_str = self._url + "/?action=query&titles=File:"
-        end_of_end_point_str = (
-            "&prop=imageinfo&iiprop=user"
-            "|userid|canonicaltitle|url|" + metatype + "&format=json"
-        )
-        request_url = start_of_end_point_str + self._filename + end_of_end_point_str
-        result = self._request_json_with_backoff("get", request_url)
-        if not result:
+        if not self._metadata:
             return None
-        page_id = next(iter(result["query"]["pages"]))
-        image_info = self._gps_info(result["query"]["pages"][page_id], metatype)
-        return image_info
-
-    def _get_page_coordinates(self) -> Optional[list]:
-        if not self._filename:
-            return None
-        params = {
-            "action": "query",
-            "prop": "coordinates",
-            "format": "json",
-            "titles": f"File:{self._filename}",
-        }
-        data = self._request_json_with_backoff("get", self._url, params=params)
-        if not data or "query" not in data or "pages" not in data["query"]:
-            return None
-        page_id = next(iter(data["query"]["pages"]))
-        page = data["query"]["pages"][page_id]
-        coords = page.get("coordinates")
-        if not coords:
-            return None
-        first = coords[0]
-        lat = first.get("lat")
-        lon = first.get("lon")
-        if lat is None or lon is None:
-            return None
-        return [lat, lon]
+        gps_latitude = self._get_lat_lon_gps("GPSLatitude", self._metadata)
+        gps_longitude = self._get_lat_lon_gps("GPSLongitude", self._metadata)
+        if gps_latitude is not None and gps_longitude is not None:
+            return [gps_latitude, gps_longitude]
+        return None
 
     @staticmethod
     def _get_lat_lon_gps(gpsname, json_image_details):
@@ -286,57 +203,6 @@ class ConfigConnection:
             return float(lat_lon[0])
         except (TypeError, ValueError):
             return None
-
-    @staticmethod
-    def _valid_json(image_info, metatype):
-        if "imageinfo" in image_info:
-            if image_info["imageinfo"][0]:
-                if metatype in image_info["imageinfo"][0]:
-                    if image_info["imageinfo"][0][metatype]:
-                        return True
-        return False
-
-    def _gps_info(self, image_info, metatype):
-        if self._valid_json(image_info, metatype):
-            json_image_details = image_info["imageinfo"][0][metatype]
-            if metatype == self._METADATA_TYPE:
-                gps_latitude = self._get_lat_lon_gps("GPSLatitude", json_image_details)
-                gps_longitude = self._get_lat_lon_gps(
-                    "GPSLongitude", json_image_details
-                )
-                if gps_latitude and gps_longitude:
-                    return [gps_latitude, gps_longitude]
-            # Getting geolocation information from image metadata
-            elif metatype == self._EXTMETADATA_TYPE:
-                if "GPSLatitude" in json_image_details:
-                    gps_latitude = float(json_image_details["GPSLatitude"]["value"])
-                    gps_longitude = float(json_image_details["GPSLongitude"]["value"])
-                    return [gps_latitude, gps_longitude]
-        return None
-
-    def get_images_from_category(self, categoryname, params={}):
-        base_url = (
-            self._url
-            + "/?action=query&format=json&list=categorymembers&cmlimit=max&cmtitle=Category:"
-        )
-        request_url = base_url + categoryname
-        results = []
-        more_params = dict(params)
-        while True:
-            result = self._request_json_with_backoff("get", request_url, params=more_params)
-            if not result:
-                break
-            image_info_list = result["query"]["categorymembers"]
-            results.extend(
-                image["title"].replace("File:", "")
-                for image in image_info_list
-                if image["title"].endswith(".jpg")
-            )
-            if "continue" not in result:
-                break
-            more_params = result["continue"]
-            time.sleep(randrange(1))
-        return results
 
     @staticmethod
     def _valid_coordinates(lat: float, lon: float) -> bool:
@@ -356,14 +222,14 @@ class ConfigConnection:
             "gaiuser": username,
             "gailimit": "max",
             "prop": "imageinfo|coordinates",
-            "iiprop": "metadata",
+            "iiprop": "metadata|url",
             "format": "json",
         }
         base_params.update(params)
         results = []
         more_params = dict(base_params)
         while True:
-            data = self._request_json_with_backoff("get", self._url, params=more_params)
+            data = self._site.api(**more_params)
             if not data or "query" not in data or "pages" not in data["query"]:
                 break
             for page in data["query"]["pages"].values():
@@ -389,14 +255,14 @@ class ConfigConnection:
         return results
 
     def can_set_metadata_location_gps(self):
-        # Only write when GPS exists (page coords preferred, extmetadata fallback) and EXIF is missing.
-        has_source = self._pagecoords or self._extmetadata
-        return has_source and not self._metadata
+        # Only write when GPS exists (page coords preferred, metadata fallback) and EXIF is missing.
+        has_source = self._pagecoords or self._get_metadata_gps()
+        return has_source and not self._get_metadata_gps()
 
     def set_metadata_location_gps(self):
         if self.can_set_metadata_location_gps():
             time.sleep(randrange(10))
-            gps_info = self._pagecoords or self._get_extmetadata_gps()
+            gps_info = self._pagecoords or self._get_metadata_gps()
             if not gps_info:
                 print("No GPS info available to write for", self._filename)
                 return
@@ -406,7 +272,7 @@ class ConfigConnection:
             print("External GPS", gps_info)
             set_gps_location(self._filename, gps_info[0], gps_info[1])
             """
-            info = gpsphoto.GPSInfo(self._get_extmetadata_gps())
+            info = gpsphoto.GPSInfo(self._get_metadata_gps())
             # Get local file downloaded
             photo = gpsphoto.GPSPhoto(self._filename)
 

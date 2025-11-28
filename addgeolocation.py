@@ -103,7 +103,7 @@ def main():
     for img in images:
         c.set_filename(img)
         if not c.can_set_metadata_location_gps():
-            if c.metadata() or c.extmetadata():
+            if c.metadata():
                 skipped_has_gps += 1
                 print(f"Skipping {img} (GPS already present)")
             else:
