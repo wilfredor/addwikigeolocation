@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Optional
 import logging
+import csv
 import typer
 
 from commons_client import CommonsClient
@@ -27,6 +28,7 @@ def main(
     category: Optional[str] = typer.Option(None, "--category", help="Scan a category instead of uploader"),
     max_depth: int = typer.Option(1, "--max-depth", help="Category recursion depth"),
     author_filter: Optional[str] = typer.Option(None, "--author-filter", help="Filter by author name (defaults to target user)"),
+    file_list: Optional[Path] = typer.Option(None, "--file-list", help="Process a specific list of files (CSV/plain)"),
     commons_user: str = typer.Option(
         None,
         "--commons-user",
@@ -52,7 +54,44 @@ def main(
     client = CommonsClient(commons_user, commons_pass, download_dir=str(download_dir) if download_dir else None)
     state = load_state(state_file) if resume else ScanState()
 
-    state = scan_user_uploads(client, target, state, state_file, category=category, max_depth=max_depth, author_filter=author)
+    if file_list:
+        titles = []
+        title_oldid = {}
+        if file_list.suffix.lower() == ".csv":
+            with file_list.open() as fh:
+                reader = csv.DictReader(fh)
+                for row in reader:
+                    title = row.get("title")
+                    if not title:
+                        continue
+                    titles.append(title)
+                    if "oldid" in row and row["oldid"]:
+                        try:
+                            title_oldid[title] = int(row["oldid"])
+                        except ValueError:
+                            pass
+        else:
+            with file_list.open() as fh:
+                for line in fh:
+                    title = line.strip()
+                    if title:
+                        titles.append(title)
+        uploads = client.fetch_uploads_for_titles(titles)
+        # apply author filter and JPEG only
+        filtered = []
+        for u in uploads:
+            if not u.title.lower().endswith((".jpg", ".jpeg")):
+                continue
+            if author and u.author and author.lower() not in u.author.lower():
+                continue
+            if title_oldid.get(u.title):
+                u.oldid = title_oldid[u.title]
+            filtered.append(u)
+        state.needs_exif = [u for u in filtered if u.has_coords and not u.has_exif_gps]
+        state.needs_template = [u.title for u in filtered if u.has_exif_gps and not u.has_coords]
+        save_state(state_file, state)
+    else:
+        state = scan_user_uploads(client, target, state, state_file, category=category, max_depth=max_depth, author_filter=author)
 
     print(
         f"Uploads for {target}: {len(state.needs_exif)} need EXIF GPS, "

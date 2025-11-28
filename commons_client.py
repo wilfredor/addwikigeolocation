@@ -71,6 +71,7 @@ class UploadInfo:
     lon: Optional[float] = None
     url: Optional[str] = None
     author: Optional[str] = None
+    oldid: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -87,6 +88,7 @@ class UploadInfo:
             lon=data.get("lon"),
             url=data.get("url"),
             author=data.get("author"),
+            oldid=data.get("oldid"),
         )
 
 
@@ -124,6 +126,25 @@ class CommonsClient:
 
     def _strip_file_prefix(self, title: str) -> str:
         return title.replace("File:", "", 1) if title.startswith("File:") else title
+
+    def _get_url_for_revision(self, title: str, oldid: int) -> Optional[str]:
+        data = self._site.api(
+            "query",
+            prop="imageinfo",
+            iiprop="url",
+            iistartid=str(oldid),
+            iiendid=str(oldid),
+            iilimit=1,
+            titles=f"File:{title}",
+            format="json",
+        )
+        if not data or "query" not in data or "pages" not in data["query"]:
+            return None
+        page = next(iter(data["query"]["pages"].values()))
+        imageinfo = page.get("imageinfo", [])
+        if not imageinfo:
+            return None
+        return imageinfo[0].get("url")
 
     def _has_metadata_gps(self, metadata_block: list) -> bool:
         if not metadata_block:
@@ -182,6 +203,13 @@ class CommonsClient:
             )
         return results
 
+    def fetch_uploads_for_titles(self, titles: List[str]) -> List[UploadInfo]:
+        uploads: List[UploadInfo] = []
+        for i in range(0, len(titles), 50):
+            batch = titles[i : i + 50]
+            uploads.extend(self._fetch_pages_batch(batch))
+        return uploads
+
     def list_uploads(
         self, username: str, cont_token: Optional[dict] = None, seen_titles: Optional[set] = None
     ) -> Tuple[List[UploadInfo], Optional[dict]]:
@@ -220,7 +248,10 @@ class CommonsClient:
 
     def download_file(self, upload: UploadInfo) -> Optional[Path]:
         if not upload.url:
-            return None
+            if upload.oldid:
+                upload.url = self._get_url_for_revision(upload.title, upload.oldid)
+            if not upload.url:
+                return None
         local_path = self._download_dir / upload.title.replace("/", "_")
         if local_path.exists():
             local_path.unlink()
