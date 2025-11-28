@@ -99,21 +99,26 @@ def main(
             page = client._site.pages[u.title]  # type: ignore
             text = page.text()
             desc_match = re.search(r"description\s*=\s*([^\n]+)", text, flags=re.IGNORECASE)
-            if not desc_match:
-                skipped += 1
-                progress.write(f"Skipping {u.title}: no description field")
-                progress.update(1)
-                continue
-            current_desc = desc_match.group(1).strip()
-            if "{" in current_desc or "}" in current_desc:
-                skipped += 1
-                progress.write(f"Skipping {u.title}: complex description")
-                progress.update(1)
-                continue
+            if desc_match:
+                current_desc = desc_match.group(1).strip()
+                if "{" in current_desc or "}" in current_desc:
+                    skipped += 1
+                    progress.write(f"Skipping {u.title}: complex description")
+                    progress.update(1)
+                    continue
+                base_desc = current_desc
+            else:
+                # fall back to extmetadata description
+                if not u.description:
+                    skipped += 1
+                    progress.write(f"Skipping {u.title}: no description field or extmetadata")
+                    progress.update(1)
+                    continue
+                base_desc = u.description
             translations = {}
             for tgt in targets:
-                translations[tgt] = translate_text(source_lang, tgt, current_desc)
-            new_text = simple_replace_description(text, source_lang, current_desc, translations)
+                translations[tgt] = translate_text(source_lang, tgt, base_desc)
+            new_text = simple_replace_description(text, source_lang, base_desc, translations)
             if not new_text:
                 skipped += 1
                 progress.write(f"Skipping {u.title}: could not rewrite safely")

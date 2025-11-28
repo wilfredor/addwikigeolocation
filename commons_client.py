@@ -73,6 +73,7 @@ class UploadInfo:
     url: Optional[str] = None
     author: Optional[str] = None
     oldid: Optional[int] = None
+    description: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -207,6 +208,7 @@ class CommonsClient:
             url = imageinfo[0].get("url") if imageinfo else None
             extmeta = imageinfo[0].get("extmetadata", {}) if imageinfo else {}
             author = extmeta.get("Artist", {}).get("value") or extmeta.get("Author", {}).get("value")
+            description = extmeta.get("Description", {}).get("value") if extmeta else None
             has_coords = coords is not None
             has_exif_gps = self._has_metadata_gps(metadata_block)
             results.append(
@@ -218,6 +220,7 @@ class CommonsClient:
                     lon=lon,
                     url=url,
                     author=author,
+                    description=description,
                 )
             )
         return results
