@@ -16,4 +16,6 @@ dist/
 
 # Tooling/output
 gps_scan.json
+.python-version
+gps_scan.bak
 .DS_Store
