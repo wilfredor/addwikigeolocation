@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
+from tempfile import NamedTemporaryFile
+from datetime import datetime
+
+from tqdm import tqdm
 
 from commons_client import CommonsClient, UploadInfo
 
@@ -36,14 +41,29 @@ class ScanState:
 
 def load_state(path: Path) -> ScanState:
     if path.exists():
-        with path.open() as fh:
-            return ScanState.from_dict(json.load(fh))
+        try:
+            with path.open() as fh:
+                return ScanState.from_dict(json.load(fh))
+        except json.JSONDecodeError:
+            ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+            backup = path.with_suffix(path.suffix + f".corrupt.{ts}.bak")
+            path.rename(backup)
+            print(f"Corrupted state file moved to {backup}, starting fresh.")
     return ScanState()
 
 
 def save_state(path: Path, state: ScanState):
-    with path.open("w") as fh:
-        json.dump(state.to_dict(), fh, indent=2)
+    tmp = NamedTemporaryFile("w", delete=False, dir=path.parent or Path("."))
+    try:
+        json.dump(state.to_dict(), tmp, indent=2)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        os.replace(tmp.name, path)
+    finally:
+        try:
+            tmp.close()
+        except Exception:
+            pass
 
 
 def scan_user_uploads(client: CommonsClient, target_user: str, state: ScanState, state_path: Path) -> ScanState:
@@ -55,9 +75,10 @@ def scan_user_uploads(client: CommonsClient, target_user: str, state: ScanState,
         return state
 
     print(f"Scanning uploads for {target_user}...")
+    progress = tqdm(total=None, unit="file", desc="Scanning", colour="cyan")
     while True:
         uploads, cont = client.list_uploads(target_user, cont_token=cont, seen_titles=seen_titles)
-        print(f" Scan batch complete. Found {len(uploads)} items.")
+        progress.update(len(uploads))
         for upload in uploads:
             if upload.has_coords and not upload.has_exif_gps:
                 state.needs_exif.append(upload)
@@ -69,6 +90,7 @@ def scan_user_uploads(client: CommonsClient, target_user: str, state: ScanState,
         if not cont or not uploads:
             break
         time.sleep(1)
+    progress.close()
 
     print(
         f"Scan complete. Found {len(state.needs_exif) + len(state.needs_template)} uploads "
