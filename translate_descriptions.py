@@ -4,7 +4,7 @@ import logging
 import re
 import csv
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 import typer
 from tqdm import tqdm
@@ -58,6 +58,35 @@ def translate_text(src_lang: str, dest_lang: str, text: str) -> str:
     return translator.translate(text)
 
 
+def parse_lang_templates(desc: str) -> Dict[str, str]:
+    """Parse {{en|...}} style language templates into a dict."""
+    langs = {}
+    for m in re.finditer(r"\{\{\s*([a-zA-Z-]{2,10})\s*\|([^{}]+?)\}\}", desc):
+        lang = m.group(1).strip().lower()
+        content = m.group(2).strip()
+        # strip possible leading numbering like 1=
+        if content.startswith("1="):
+            content = content[2:].strip()
+        langs[lang] = content
+    return langs
+
+
+def build_multilingual_desc(lang_map: Dict[str, str]) -> str:
+    parts = [f"{lang}={text}" for lang, text in lang_map.items()]
+    return "{{Multilingual description|" + "|".join(parts) + "}}"
+
+
+def replace_description_block(text: str, new_desc: str) -> Optional[str]:
+    """Replace the description= block (multiline) in the Information template."""
+    pattern = re.compile(r"(description\s*=\s*)(.*?)(\n\|[a-zA-Z_]+\s*=|\n\}\})", re.IGNORECASE | re.DOTALL)
+    m = pattern.search(text)
+    if not m:
+        return None
+    prefix, _, suffix = m.groups()
+    # suffix already includes leading newline
+    return text[: m.start()] + prefix + new_desc + suffix + text[m.end() :]
+
+
 @app.command()
 def main(
     category: str = typer.Option(..., "--category", help="Category name (without 'Category:' prefix)"),
@@ -108,32 +137,47 @@ def main(
             try:
                 page = client._site.pages[u.title]  # type: ignore
                 text = page.text()
-                desc_match = re.search(r"description\s*=\s*([^\n]+)", text, flags=re.IGNORECASE)
-                if desc_match:
-                    current_desc = desc_match.group(1).strip()
-                    if "{" in current_desc or "}" in current_desc:
-                        skipped += 1
-                        reason = "complex description"
-                        progress.write(f"Skipping {u.title}: {reason}")
-                        log_rows.append({"title": u.title, "status": "skipped", "reason": reason})
-                        progress.update(1)
-                        continue
-                    base_desc = current_desc
-                else:
+                # Try to extract description block (multiline)
+                desc_block_match = re.search(r"(description\s*=\s*)(.*?)(\n\|[a-zA-Z_]+\s*=|\n\}\})", text, flags=re.IGNORECASE | re.DOTALL)
+                base_desc = None
+                lang_map = {}
+                if desc_block_match:
+                    block = desc_block_match.group(2).strip()
+                    lang_map = parse_lang_templates(block)
+                    if lang_map:
+                        base_desc = lang_map.get(source_lang)
+                if not base_desc:
+                    # fallback to extmetadata or SDC
                     base_desc = u.description
                     if not base_desc:
                         base_desc = client.fetch_sdc_description(u.title, source_lang)
-                    if not base_desc:
-                        skipped += 1
-                        reason = "no description field, extmetadata, or SDC"
-                        progress.write(f"Skipping {u.title}: {reason}")
-                        log_rows.append({"title": u.title, "status": "skipped", "reason": reason})
-                        progress.update(1)
-                        continue
-                translations = {}
+                if not base_desc:
+                    skipped += 1
+                    reason = "no description field, extmetadata, or SDC"
+                    progress.write(f"Skipping {u.title}: {reason}")
+                    log_rows.append({"title": u.title, "status": "skipped", "reason": reason})
+                    progress.update(1)
+                    continue
+                # build or extend lang map
+                if not lang_map:
+                    lang_map = {source_lang: base_desc}
+                else:
+                    lang_map.setdefault(source_lang, base_desc)
+                added = 0
                 for tgt in targets:
-                    translations[tgt] = translate_text(source_lang, tgt, base_desc)
-                new_text = simple_replace_description(text, source_lang, base_desc, translations)
+                    if tgt in lang_map:
+                        continue
+                    lang_map[tgt] = translate_text(source_lang, tgt, base_desc)
+                    added += 1
+                if added == 0:
+                    skipped += 1
+                    reason = "all target languages present"
+                    progress.write(f"Skipping {u.title}: {reason}")
+                    log_rows.append({"title": u.title, "status": "skipped", "reason": reason})
+                    progress.update(1)
+                    continue
+                new_desc = build_multilingual_desc(lang_map)
+                new_text = replace_description_block(text, new_desc)
                 if not new_text:
                     skipped += 1
                     reason = "could not rewrite safely"
@@ -146,9 +190,9 @@ def main(
                     updated += 1
                     log_rows.append({"title": u.title, "status": "updated", "reason": ""})
                 else:
-                    progress.write(f"Dry-run {u.title}: {translations}")
+                    progress.write(f"Dry-run {u.title}: added {added} languages")
                     updated += 1
-                    log_rows.append({"title": u.title, "status": "dry-run", "reason": ""})
+                    log_rows.append({"title": u.title, "status": "dry-run", "reason": f"added {added}"})
             except Exception as exc:
                 errors += 1
                 progress.write(f"Error on {u.title}: {exc}")
