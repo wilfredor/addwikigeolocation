@@ -57,6 +57,8 @@ def translate_text(src_lang: str, dest_lang: str, text: str) -> str:
     if not from_lang or not to_lang:
         raise RuntimeError(f"Missing translation model {src_lang}->{dest_lang}")
     translator = from_lang.get_translation(to_lang)
+    if translator is None:
+        raise RuntimeError(f"Missing translation model {src_lang}->{dest_lang}")
     return translator.translate(text)
 
 
