@@ -25,6 +25,7 @@ restore_originals = "restore_originals:app"
 translate_descriptions = "translate_descriptions:app"
 remove_geolocation = "remove_geolocation:app"
 rollback_descriptions = "rollback_descriptions:app"
+tag_for_deletion = "tag_for_deletion:app"
 
 [tool.setuptools]
 py-modules = [
