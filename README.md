@@ -1,16 +1,13 @@
-# addwikigeolocation
-Bot/script to enrich Commons images with GPS metadata. It reads geolocation from the file page coordinates (with EXIF GPS as fallback) and writes it into the local file's EXIF GPS block, with safeguards to avoid overwriting images that already have GPS. Now organized in small modules with a Typer CLI and resumable scans.
+# Commons toolbox CLI
+CLI toolbox for Wikimedia Commons maintenance: add/remove geolocation (EXIF + page templates), translate descriptions with Argos, and restore/rollback file versions. Uses BotPassword credentials, optional `.env`, and CSV logs for traceability.
 
-## What it does
-- Pulls files from either uploads (logevents) or a category (with optional recursion), deduplicates, and partitions into:
-  - files with page coordinates but missing EXIF GPS (to update EXIF);
-  - files with EXIF GPS but missing page coordinates (report only).
-- Filters to JPEGs and, optionally, by author (extmetadata `Artist`/`Author`).
-- Shuffles and processes the EXIF-missing list up to a configurable max, showing progress `[x/total]`.
-- Reads GPS from page coordinates, falling back to EXIF if needed; writes EXIF only when missing GPS.
-- Resumable scans: stores lists and continuation token in `gps_scan.json` and updates after each batch/item.
-- Uses jittered sleeps and per-minute cap; downloads to temp dir by default and cleans up.
-- Optional upload back to Commons via `--upload`.
+## Scripts overview
+- `addgeolocation.py` — scans uploads or categories, finds JPEGs with page coordinates but missing EXIF GPS, writes GPS to EXIF, and (optionally) uploads the updated file back. Resumable via `gps_scan.json`, supports author filter, rate limits, and temp downloads cleanup.
+- `remove_geolocation.py` — removes GPS from EXIF and/or page templates. Can run dry-run, EXIF-only, page-only, and has a guarded `--purge-history` flag (admin-only).
+- `restore_originals.py` — restores a previous revision by explicit `oldid` (CSV) or by time window (`--since`). Optionally applies the edit or runs dry.
+- `rollback_descriptions.py` — reverts the file description to the previous revision (per file list or single title), dry-run by default.
+- `translate_descriptions.py` — adds missing translations (es, fr, pt, ru, zh, de) using Argos. Auto-detects source language from {{lang|...}} or falls back to `DEFAULT_SOURCE_LANG`. Logs incrementally to CSV; skips on missing models or abusefilter.
+- Support modules: `commons_client.py` (API helpers), `processor.py` (EXIF and image ops), `scanner.py` (listing and state).
 
 ## Requirements
 - Python 3.9+
@@ -20,20 +17,17 @@ Bot/script to enrich Commons images with GPS metadata. It reads geolocation from
   ```
 
 ## Credentials
-- Preferred: set environment variables `COMMONS_USER` and `COMMONS_PASS`.
-- Optional: set `COMMONS_TARGET_USER` to scan uploads from a different user (defaults to the login user).
-- Interactive fallback: if env vars are absent, the script will prompt for username and password (password is hidden with `getpass`).
-- A sample `.env.example` is provided; keep your real `.env` out of git.
+- Set `COMMONS_USER` and `COMMONS_PASS` (BotPassword recommended). A `.env.example` is provided; `.env` is gitignored and auto-loaded by scripts.
+- Optional: `COMMONS_TARGET_USER` for scanning another uploader; `DEFAULT_SOURCE_LANG` for translations fallback.
 
-## Running
+## Running (key scripts)
+
+### addgeolocation.py (add EXIF GPS)
+Requirements: `COMMONS_USER`, `COMMONS_PASS`; JPEGs only; uses temp downloads; respects `gps_scan.json` for resume.
 ```sh
 export COMMONS_USER=YourUser
 export COMMONS_PASS=YourPassword
 
-# Restore originals from list (CSV title,oldid or plain text titles)
-python restore_originals.py --file-list restore.csv --comment "Restoring original version"
-
-# Normal geolocation run
 python addgeolocation.py \
   --target-user YourUser \  # or --category "Category:Foo" --max-depth 2
   --author-filter YourUser  # default is the target user
@@ -55,16 +49,8 @@ Defaults:
 - Category scan: use `--category` with `--max-depth` to recurse subcats
 - Author filter: use `--author-filter` (defaults to target user) to match extmetadata author
 
-### Restore originals (lossless, picks previous revision)
-```sh
-python restore_originals.py \
-  --since 2025-11-28T00:00:00Z \
-  --comment "Restoring original version" \
-  --apply   # remove for dry-run
-# or provide a CSV with title,oldid via --file-list restore.csv
-```
-
-### Remove geolocation (EXIF + page templates)
+### remove_geolocation.py (strip GPS)
+Requirements: `COMMONS_USER`, `COMMONS_PASS`.
 ```sh
 python remove_geolocation.py \
   --category "MyCategory" --max-depth 1 \
@@ -74,7 +60,26 @@ python remove_geolocation.py \
 ```
 `--purge-history` is available but requires admin rights and is not automated (manual action recommended).
 
-### Translate descriptions (offline argostranslate)
+### restore_originals.py (lossless restore)
+Requirements: `COMMONS_USER`, `COMMONS_PASS`; optionally a CSV (`title,oldid`) or `--since`.
+```sh
+python restore_originals.py \
+  --since 2025-11-28T00:00:00Z \
+  --comment "Restoring original version" \
+  --apply   # remove for dry-run
+# or provide a CSV with title,oldid via --file-list restore.csv
+```
+
+### rollback_descriptions.py (revert description)
+Requirements: `COMMONS_USER`, `COMMONS_PASS`; file list via CSV or title.
+```sh
+python rollback_descriptions.py \
+  --file-list somefiles.csv \
+  --apply   # omit for dry-run
+```
+
+### translate_descriptions.py (Argos translations)
+Requirements: `COMMONS_USER`, `COMMONS_PASS`, `argostranslate` installed plus models for needed pairs; optional `DEFAULT_SOURCE_LANG` fallback.
 ```sh
 export COMMONS_USER=YourBotUser   # e.g., Wilfredor@BotPassword
 export COMMONS_PASS=YourBotPass
