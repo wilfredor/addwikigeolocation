@@ -8,7 +8,6 @@ from typing import List, Optional, Dict
 import mwclient
 import os
 from pathlib import Path
-
 import typer
 from tqdm import tqdm
 
@@ -111,6 +110,27 @@ def find_description_blocks(text: str):
     return list(pattern.finditer(text))
 
 
+def parse_multilingual_block(block: str) -> Dict[str, str]:
+    """Parse Multilingual description|en=...|es=... into a lang map."""
+    blk = block.strip()
+    # strip braces if present
+    if blk.startswith("{{") and blk.endswith("}}"):
+        blk = blk[2:-2].strip()
+    if not blk.lower().startswith("multilingual description"):
+        return {}
+    parts = blk.split("|")[1:]  # drop template name
+    langs = {}
+    for p in parts:
+        if "=" not in p:
+            continue
+        k, v = p.split("=", 1)
+        k = k.strip().lower()
+        v = v.strip()
+        if k and v:
+            langs[k] = v
+    return langs
+
+
 def replace_description_block(text: str, match: re.Match, new_desc: str) -> str:
     prefix, _, suffix = match.groups()
     return text[: match.start()] + prefix + new_desc + suffix + text[match.end() :]
@@ -125,6 +145,7 @@ def main(
     category: str = typer.Option(..., "--category", help="Category name (without 'Category:' prefix)"),
     apply: bool = typer.Option(False, "--apply", help="Apply edits (default: dry-run)"),
     log_csv: Optional[Path] = typer.Option(None, "--log-csv", help="Optional CSV log of actions"),
+    max_edits: Optional[int] = typer.Option(None, "--max-edits", help="Stop after this many updates; process all if omitted"),
 ):
     """Translate descriptions for files in a category and optionally update wikitext.
 
@@ -158,6 +179,7 @@ def main(
     skipped = 0
     errors = 0
     log_rows = []
+    stop_early = False
     def add_log(title: str, status: str, reason: str, source: str = "", desc: str = ""):
         log_rows.append(
             {
@@ -189,11 +211,20 @@ def main(
                 blocks = find_description_blocks(text)
                 for m in blocks:
                     block = m.group(2).strip()
-                    lang_map = parse_lang_templates(block)
+                    lang_map = parse_multilingual_block(block)
+                    if not lang_map:
+                        # If it looks like a multilingual block but we can't parse, skip to avoid corruption
+                        if "multilingual description" in block.lower():
+                            lang_map = {}
+                            break
+                        lang_map = parse_lang_templates(block)
                     if lang_map:
                         source_lang = next(iter(lang_map.keys()))
                         base_desc = lang_map.get(source_lang) or next(iter(lang_map.values()))
                         target_match = m
+                        break
+                    elif "multilingual description" in block.lower():
+                        # malformed multilingual block — do not touch
                         break
                     elif block:
                         raw = block
@@ -234,13 +265,28 @@ def main(
                     add_log(u.title, "skipped", reason, source="none", desc=text[:2000])
                     progress.update(1)
                     continue
+                # Avoid rewriting formatted / multiline descriptions (keep safe)
+                if base_desc and base_desc.count("\n") > 1:
+                    skipped += 1
+                    reason = "multiline description, skipped for safety"
+                    progress.write(f"Skipping {u.title}: {reason}")
+                    add_log(u.title, "skipped", reason, source="wikitext/extmeta/SDC", desc=base_desc)
+                    progress.update(1)
+                    continue
+                # If all targets already exist, skip
+                if all(t in lang_map for t in targets):
+                    skipped += 1
+                    reason = "all target languages present"
+                    progress.write(f"Skipping {u.title}: {reason}")
+                    add_log(u.title, "skipped", reason, source="wikitext/extmeta/SDC", desc=base_desc or "")
+                    progress.update(1)
+                    continue
                 lang_map.setdefault(source_lang, base_desc)
                 added = 0
                 for tgt in targets:
                     if tgt == source_lang or tgt in lang_map:
                         continue
                     try:
-                        ensure_model(source_lang, tgt)
                         lang_map[tgt] = translate_text(source_lang, tgt, base_desc)
                         added += 1
                     except RuntimeError as e:
@@ -295,6 +341,12 @@ def main(
                 logging.exception("Error translating %s", u.title)
                 add_log(u.title, "error", str(exc), source="", desc="")
             progress.update(1)
+            if max_edits is not None and updated >= max_edits:
+                progress.write(f"Reached max-edits={max_edits}; stopping early.")
+                stop_early = True
+                break
+        if stop_early:
+            pass
     except KeyboardInterrupt:
         progress.write("Interrupted by user.")
     progress.close()

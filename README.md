@@ -90,14 +90,16 @@ export DEFAULT_SOURCE_LANG=es
 python translate_descriptions.py \
   --category "Quality images by Wilfredor" \
   --log-csv translations_report.csv \
+  --max-edits 20 \
   --apply    # omit to dry-run
 ```
 Behavior:
 - Source language is auto-detected from existing {{lang|...}}; if missing, falls back to `DEFAULT_SOURCE_LANG` (default: en).
 - Targets are fixed to es, fr, pt, ru, zh, de.
-- Requires `argostranslate` and the corresponding models. If a model is missing you’ll see `missing model src->tgt` and the file is skipped.
+- Backend: local `argostranslate` with installed models (missing models will be skipped).
 - Uses `COMMONS_USER` / `COMMONS_PASS` from env (or `.env` is read automatically).
 - Writes incremental log rows to `--log-csv` as it runs.
+- Optional: `--max-edits` to cap how many pages are updated in one run (processes all if omitted).
 
 The script prints a summary: updated, skipped (already had GPS), skipped (no GPS source), and errors.
 
