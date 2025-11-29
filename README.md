@@ -5,7 +5,6 @@ CLI toolbox for Wikimedia Commons maintenance: add/remove geolocation (EXIF + pa
 - `addgeolocation.py` — scans uploads or categories, finds JPEGs with page coordinates but missing EXIF GPS, writes GPS to EXIF, and (optionally) uploads the updated file back. Resumable via `gps_scan.json`, supports author filter, rate limits, and temp downloads cleanup.
 - `remove_geolocation.py` — removes GPS from EXIF and/or page templates. Can run dry-run, EXIF-only, page-only, and has a guarded `--purge-history` flag (admin-only).
 - `restore_originals.py` — restores a previous revision by explicit `oldid` (CSV) or by time window (`--since`). Optionally applies the edit or runs dry.
-- `rollback_descriptions.py` — reverts the file description to the previous revision (per file list or single title), dry-run by default.
 - `translate_descriptions.py` — adds missing translations (es, fr, pt, ru, zh, de) using Argos. Auto-detects source language from {{lang|...}} or falls back to `DEFAULT_SOURCE_LANG`. Logs incrementally to CSV; skips on missing models or abusefilter.
 - Support modules: `commons_client.py` (API helpers), `processor.py` (EXIF and image ops), `scanner.py` (listing and state).
 
@@ -68,14 +67,6 @@ python restore_originals.py \
   --comment "Restoring original version" \
   --apply   # remove for dry-run
 # or provide a CSV with title,oldid via --file-list restore.csv
-```
-
-### rollback_descriptions.py (revert description)
-Requirements: `COMMONS_USER`, `COMMONS_PASS`; file list via CSV or title.
-```sh
-python rollback_descriptions.py \
-  --file-list somefiles.csv \
-  --apply   # omit for dry-run
 ```
 
 ### translate_descriptions.py (Argos translations)

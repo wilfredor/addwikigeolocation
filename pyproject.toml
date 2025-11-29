@@ -24,7 +24,6 @@ addwikigeolocation = "addgeolocation:app"
 restore_originals = "restore_originals:app"
 translate_descriptions = "translate_descriptions:app"
 remove_geolocation = "remove_geolocation:app"
-rollback_descriptions = "rollback_descriptions:app"
 
 [tool.setuptools]
 py-modules = [
