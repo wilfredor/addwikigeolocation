@@ -152,7 +152,8 @@ def main(
     try:
         for u in uploads:
             try:
-                page = client._site.pages[u.title]  # type: ignore
+                full_title = u.title if u.title.startswith("File:") else f"File:{u.title}"
+                page = client._site.pages[full_title]  # type: ignore
                 text = client.fetch_wikitext(u.title) or page.text()
                 base_desc = None
                 lang_map = {}
