@@ -76,12 +76,23 @@ python remove_geolocation.py \
 
 ### Translate descriptions (offline argostranslate)
 ```sh
+export COMMONS_USER=YourBotUser   # e.g., Wilfredor@BotPassword
+export COMMONS_PASS=YourBotPass
+# optional fallback when no lang template present
+export DEFAULT_SOURCE_LANG=es
+
+# Translates descriptions for JPEGs in the category (depth 1)
 python translate_descriptions.py \
-  --category "MyCategory" --max-depth 1 \
-  --source-lang en --target-lang es --target-lang pt \
-  --apply    # default is dry-run
+  --category "Quality images by Wilfredor" \
+  --log-csv translations_report.csv \
+  --apply    # omit to dry-run
 ```
-Install `argostranslate` separately (`pip install argostranslate`) and download models as needed.
+Behavior:
+- Source language is auto-detected from existing {{lang|...}}; if missing, falls back to `DEFAULT_SOURCE_LANG` (default: en).
+- Targets are fixed to es, fr, pt, ru, zh, de.
+- Requires `argostranslate` and the corresponding models. If a model is missing you’ll see `missing model src->tgt` and the file is skipped.
+- Uses `COMMONS_USER` / `COMMONS_PASS` from env (or `.env` is read automatically).
+- Writes incremental log rows to `--log-csv` as it runs.
 
 The script prints a summary: updated, skipped (already had GPS), skipped (no GPS source), and errors.
 

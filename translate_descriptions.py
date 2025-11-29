@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Optional, Dict
 import mwclient
 import os
+from pathlib import Path
 
 import typer
 from tqdm import tqdm
@@ -22,16 +23,39 @@ from commons_client import CommonsClient
 app = typer.Typer(add_completion=False)
 
 
+def load_local_env():
+    """Populate os.environ from a .env file if present (non-intrusive)."""
+    env_path = Path(".env")
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        os.environ.setdefault(key, val)
+
+
 def ensure_model(src: str, dest: str):
     if argostranslate is None:
         raise RuntimeError("argostranslate not installed. Install via `pip install argostranslate`.")
     available_packages = argostranslate.package.get_available_packages()
     installed_languages = argostranslate.translate.get_installed_languages()
-    if not any(lang.code == src for lang in installed_languages):
+    # install if the specific pair is missing
+    has_pair = False
+    to_lang = next((l for l in installed_languages if l.code == dest), None)
+    for lang in installed_languages:
+        if lang.code == src and to_lang and lang.get_translation(to_lang):
+            has_pair = True
+            break
+    if not has_pair:
         for pkg in available_packages:
             if pkg.from_code == src and pkg.to_code == dest:
                 argostranslate.package.install_from_path(pkg.download())
                 break
+        argostranslate.translate.load_installed_languages()
     argostranslate.translate.load_installed_languages()
 
 
@@ -57,7 +81,8 @@ def translate_text(src_lang: str, dest_lang: str, text: str) -> str:
     if not from_lang or not to_lang:
         raise RuntimeError(f"Missing translation model {src_lang}->{dest_lang}")
     translator = from_lang.get_translation(to_lang)
-    if translator is None:
+    # Some installs return None instead of raising when the model is missing.
+    if translator is None or not hasattr(translator, "translate"):
         raise RuntimeError(f"Missing translation model {src_lang}->{dest_lang}")
     return translator.translate(text)
 
@@ -113,12 +138,12 @@ def main(
     logging.getLogger("argostranslate").setLevel(logging.ERROR)
     logging.getLogger("argostranslate.utils").setLevel(logging.ERROR)
     targets = ["es", "fr", "pt", "ru", "zh", "de"]
-    source_lang = None
+    default_source_lang = os.getenv("DEFAULT_SOURCE_LANG", "en")
     if argostranslate is None:
         raise typer.Exit("argostranslate not installed. Run `pip install argostranslate` first.")
-    for tgt in targets:
-        ensure_model("en", tgt)  # models need a source; we'll validate actual source per file
 
+    # Pull credentials from .env if present (without overriding already-set env vars)
+    load_local_env()
     commons_user = os.getenv("COMMONS_USER")
     commons_pass = os.getenv("COMMONS_PASS")
     if not commons_user or not commons_pass:
@@ -160,11 +185,13 @@ def main(
                 base_desc = None
                 lang_map = {}
                 target_match = None
+                source_lang = None
                 blocks = find_description_blocks(text)
                 for m in blocks:
                     block = m.group(2).strip()
                     lang_map = parse_lang_templates(block)
                     if lang_map:
+                        source_lang = next(iter(lang_map.keys()))
                         base_desc = lang_map.get(source_lang) or next(iter(lang_map.values()))
                         target_match = m
                         break
@@ -196,27 +223,29 @@ def main(
                     add_log(u.title, "skipped", reason, source="none", desc=text[:2000])
                     progress.update(1)
                     continue
-                src_lang = None
                 if lang_map:
-                    src_lang = next(iter(lang_map.keys()))
-                if not src_lang:
+                    source_lang = next(iter(lang_map.keys()))
+                else:
+                    source_lang = default_source_lang if base_desc else None
+                if not source_lang:
                     skipped += 1
                     reason = "no source language detected"
                     progress.write(f"Skipping {u.title}: {reason}")
                     add_log(u.title, "skipped", reason, source="none", desc=text[:2000])
                     progress.update(1)
                     continue
-                lang_map.setdefault(src_lang, base_desc)
+                lang_map.setdefault(source_lang, base_desc)
                 added = 0
                 for tgt in targets:
-                    if tgt == src_lang or tgt in lang_map:
+                    if tgt == source_lang or tgt in lang_map:
                         continue
                     try:
-                        lang_map[tgt] = translate_text(src_lang, tgt, base_desc)
+                        ensure_model(source_lang, tgt)
+                        lang_map[tgt] = translate_text(source_lang, tgt, base_desc)
                         added += 1
                     except RuntimeError as e:
                         skipped += 1
-                        reason = f"missing model {src_lang}->{tgt}"
+                        reason = f"missing model {source_lang}->{tgt}"
                         progress.write(f"Skipping {u.title}: {reason}")
                         add_log(u.title, "skipped", reason, source="wikitext/extmeta/SDC", desc=base_desc)
                         progress.update(1)
