@@ -70,12 +70,14 @@ python restore_originals.py \
 ```
 
 ### translate_descriptions.py (Argos translations)
-Requirements: `COMMONS_USER`, `COMMONS_PASS`, `argostranslate` installed plus models for needed pairs; optional `DEFAULT_SOURCE_LANG` fallback.
+Requirements: `COMMONS_USER`, `COMMONS_PASS`; optional cloud backend `GOOGLE_TRANSLATE_KEY` or local `argostranslate` (install + models). Optional `DEFAULT_SOURCE_LANG` fallback.
 ```sh
 export COMMONS_USER=YourBotUser   # e.g., Wilfredor@BotPassword
 export COMMONS_PASS=YourBotPass
 # optional fallback when no lang template present
 export DEFAULT_SOURCE_LANG=es
+# optional Google backend
+export GOOGLE_TRANSLATE_KEY=your_key
 
 # Translates descriptions for JPEGs in the category (depth 1)
 python translate_descriptions.py \
@@ -87,7 +89,7 @@ python translate_descriptions.py \
 Behavior:
 - Source language is auto-detected from existing {{lang|...}}; if missing, falls back to `DEFAULT_SOURCE_LANG` (default: en).
 - Targets are fixed to es, fr, pt, ru, zh, de.
-- Backend: local `argostranslate` with installed models (missing models will be skipped).
+- Backend: Google Translate if `GOOGLE_TRANSLATE_KEY` is set; otherwise local `argostranslate` with installed models (missing models will be skipped).
 - Uses `COMMONS_USER` / `COMMONS_PASS` from env (or `.env` is read automatically).
 - Writes incremental log rows to `--log-csv` as it runs.
 - Optional: `--max-edits` to cap how many pages are updated in one run (processes all if omitted).
