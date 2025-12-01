@@ -15,10 +15,27 @@ app = typer.Typer(add_completion=False)
 
 # Templates de localização que queremos detectar
 GPS_TEMPLATES_RE = re.compile(
-    r"\{\{\s*(Object location(?: dec)?|Camera location(?: dec)?|Location dec)",
+    r"\{\{\s*("
+    r"Object location(?: dec)?|"      # {{Object location}}, {{Object location dec}}
+    r"Camera location(?: dec)?|"      # {{Camera location}}, {{Camera location dec}}
+    r"Location(?: dec)?|"             # {{Location}}, {{Location dec}}
+    r"Coord(?:inates)?"               # {{Coord}}, {{Coordinates}}
+    r")\b",
     re.IGNORECASE,
 )
 
+# Linha com {{GPS EXIF}} (geralmente usada sozinha em uma linha)
+GPS_EXIF_LINE_RE = re.compile(
+    r"(?mi)^\s*\{\{\s*GPS\s+EXIF[^}]*\}\}\s*\n?"
+)
+
+REDIRECT_RE = re.compile(r"(?i)^\s*#redirect\b", re.MULTILINE)
+FILEDESC_HEADING_RE = re.compile(r"(?im)^==\s*\{\{\s*int:filedesc\s*\}\}\s*==\s*$")
+
+def is_redirect(wikitext: str) -> bool:
+    if not wikitext:
+        return False
+    return bool(REDIRECT_RE.search(wikitext))
 
 def read_titles_from_file(file_list: Path) -> List[str]:
     titles: List[str] = []
@@ -73,10 +90,36 @@ def has_gps_template(wikitext: str) -> bool:
     return bool(GPS_TEMPLATES_RE.search(wikitext))
 
 
-def build_camera_location_template(lat: float, lon: float) -> str:
-    # usa versão decimal do template
-    return "{{Camera location dec|{:.6f}|{:.6f}}}\n".format(lat, lon)
+def remove_gps_exif_template(wikitext: str) -> str:
+    """
+    Remove linhas com {{GPS EXIF}} da wikitext.
+    """
+    return GPS_EXIF_LINE_RE.sub("", wikitext)
 
+
+def build_camera_location_template(lat: float, lon: float) -> str:
+    return "{{{{Camera location dec|{:.6f}|{:.6f}}}}}\n".format(lat, lon)
+
+
+def insert_after_filedesc_heading(wikitext: str, tpl: str) -> str:
+    """
+    Insere o template logo após o heading =={{int:filedesc}}== se existir;
+    caso contrário, adiciona no topo.
+    """
+    match = FILEDESC_HEADING_RE.search(wikitext)
+    if not match:
+        return tpl + wikitext
+
+    insert_pos = match.end()
+    prefix = wikitext[:insert_pos]
+    suffix = wikitext[insert_pos:]
+
+    if not prefix.endswith("\n"):
+        prefix += "\n"
+    if suffix.startswith("\n"):
+        suffix = suffix[1:]
+
+    return prefix + tpl + suffix
 
 def edit_page(
     client: CommonsClient,
@@ -142,6 +185,7 @@ def main(
     Adiciona {{Camera location dec}} usando GPS do EXIF quando:
     - o arquivo tem GPS no EXIF
     - e a página NÃO tem template de localização.
+    Também remove {{GPS EXIF}} da página na mesma edição.
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -155,7 +199,8 @@ def main(
 
     try:
         target = target_user or commons_user
-        author = author_filter or target
+        # If --author-filter is provided as empty string, disable author filtering
+        author = target if author_filter is None else author_filter
 
         uploads: List[UploadInfo] = []
 
@@ -167,61 +212,122 @@ def main(
         else:
             uploads, _ = client.list_uploads(target)
 
+        total_listed = len(uploads)
+        skipped_non_jpeg = 0
+        skipped_author = 0
+        skipped_redirect = 0
+        skipped_has_template = 0
+        skipped_no_gps_read = 0
+        gps_exif_present = 0
+        gps_exif_removed = 0
+
         # Filtro básico
         filtered: List[UploadInfo] = []
         for u in uploads:
             if not u.title.lower().endswith((".jpg", ".jpeg")):
+                skipped_non_jpeg += 1
                 continue
             if author and u.author and author.lower() not in u.author.lower():
-                continue
-            if not u.has_exif_gps:
+                skipped_author += 1
                 continue
             filtered.append(u)
 
-        logging.info("Found %d JPEG uploads with EXIF GPS to check.", len(filtered))
+        total_candidates = len(filtered)
+        max_to_process = min(total_candidates, count) if count > 0 else total_candidates
+        logging.info(
+            "Category/uploader returned %d items: %d non-JPEG, %d author-mismatch, %d remaining to check (processing up to %d).",
+            total_listed,
+            skipped_non_jpeg,
+            skipped_author,
+            total_candidates,
+            max_to_process,
+        )
 
         edits_done = 0
+        processed = 0
         for upload in filtered:
-            if edits_done >= count:
+            if processed >= max_to_process:
                 break
 
+            logging.info("[%d/%d] Checking %s", processed + 1, max_to_process, upload.title)
+
             wikitext = client.fetch_wikitext(upload.title) or ""
+            has_gps_exif_tpl = bool(GPS_EXIF_LINE_RE.search(wikitext))
+            if has_gps_exif_tpl:
+                gps_exif_present += 1
+            if is_redirect(wikitext):
+                logging.info("Skipping %s (redirect page).", upload.title)
+                skipped_redirect += 1
+                processed += 1
+                continue
+
             if has_gps_template(wikitext):
                 logging.info("Skipping %s (already has location template).", upload.title)
+                skipped_has_template += 1
+                processed += 1
                 continue
 
             lat, lon = extract_exif_gps(client, upload.title)
             if lat is None or lon is None:
-                logging.info("Skipping %s (could not read EXIF GPS).", upload.title)
+                logging.info(
+                    "Skipping %s (could not read EXIF GPS; upload.has_exif_gps=%s; GPS_EXIF_template=%s).",
+                    upload.title,
+                    upload.has_exif_gps,
+                    has_gps_exif_tpl,
+                )
+                skipped_no_gps_read += 1
+                processed += 1
                 continue
 
             tpl = build_camera_location_template(lat, lon)
-            new_text = tpl + wikitext
+            cleaned_wikitext = remove_gps_exif_template(wikitext)
+            new_text = insert_after_filedesc_heading(cleaned_wikitext, tpl)
 
             if dry_run:
-                print(f"[DRY RUN] Would add {tpl.strip()} to File:{upload.title}")
+                msg = f"[DRY RUN] Would add {tpl.strip()} to File:{upload.title}"
+                if "GPS EXIF" in wikitext:
+                    msg += " and remove {{GPS EXIF}}"
+                print(msg)
                 edits_done += 1
+                processed += 1
                 continue
 
             ok = edit_page(
                 client,
                 upload.title,
                 new_text,
-                summary="Adding {{Camera location dec}} from EXIF GPS (bot).",
+                summary="Adding {{Camera location dec}} from EXIF GPS and removing {{GPS EXIF}} (bot).",
             )
             if ok:
                 logging.info(
-                    "Added Camera location template to %s with lat=%.6f lon=%.6f",
+                    "Updated %s: added Camera location template with lat=%.6f lon=%.6f and removed GPS EXIF if present",
                     upload.title,
                     lat,
                     lon,
                 )
+                if has_gps_exif_tpl:
+                    gps_exif_removed += 1
                 edits_done += 1
+                processed += 1
                 time.sleep(sleep)
             else:
                 logging.error("Failed to edit %s", upload.title)
+                processed += 1
 
-        logging.info("Done. Performed %d edits.", edits_done)
+        logging.info(
+            "Done. Processed %d/%d candidates. Performed %d edits. Skipped: %d redirects, %d with existing location template, %d could not read EXIF GPS.",
+            processed,
+            max_to_process,
+            edits_done,
+            skipped_redirect,
+            skipped_has_template,
+            skipped_no_gps_read,
+        )
+        logging.info(
+            "GPS EXIF templates seen: %d; removed via edit: %d.",
+            gps_exif_present,
+            gps_exif_removed,
+        )
     finally:
         client.close()
 

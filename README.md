@@ -48,6 +48,30 @@ Defaults:
 - Category scan: use `--category` with `--max-depth` to recurse subcats
 - Author filter: use `--author-filter` (defaults to target user) to match extmetadata author
 
+### add_camera_location_from_exif.py (add page template from EXIF GPS)
+Adds `{{Camera location dec}}` to pages that have EXIF GPS but no location template; removes `{{GPS EXIF}}`; skips redirects. Prompts for Commons username/password (BotPassword recommended). `--count` limits how many files are processed (including skips), not how many edits are made.
+```sh
+# Scan one category (depth 1) and add template to up to 25 pages (default)
+python add_camera_location_from_exif.py \
+  --category "Quality images by Wilfredor" \
+  --max-depth 1 \
+  --count 25 \
+  --dry-run   # drop this flag to actually edit
+
+# Example to review up to 5000 images in a large category
+python add_camera_location_from_exif.py \
+  --category "YourCategoryName" \
+  --max-depth 2 \
+  --count 5000 \
+  --sleep 2.0
+
+# To disable author filtering (process all files in the category), pass an empty string
+python add_camera_location_from_exif.py \
+  --category "YourCategoryName" \
+  --author-filter "" \
+  --count 5000
+```
+
 ### remove_geolocation.py (strip GPS)
 Requirements: `COMMONS_USER`, `COMMONS_PASS`.
 ```sh
